@@ -1,0 +1,40 @@
+{
+  "name": "XAUTrader",
+  "short_name": "XAUTrader",
+  "description": "XAU/USD Trading Dashboard — Emanuele Bacciu",
+  "theme_color": "#000000",
+  "background_color": "#000000",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "start_url": "/",
+  "scope": "/",
+  "id": "xautrader-v1",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Oggi",
+      "url": "/?tab=daily",
+      "description": "Vista giornaliera"
+    },
+    {
+      "name": "Performance",
+      "url": "/?tab=stats",
+      "description": "Statistiche complete"
+    }
+  ]
+}
