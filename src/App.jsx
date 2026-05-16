@@ -387,12 +387,13 @@ const useDragCrosshair = () => {
     const dy = Math.abs(clientY - startYRef.current);
 
     if (pendingRef.current) {
-      // Direzione ancora da decidere — aspetta almeno 6px di movimento
-      if (dx < 6 && dy < 6) return;
-      if (dy > dx) {
-        // Gesto verticale → scroll, abbandona
+      // Direzione ancora da decidere — aspetta almeno 8px di movimento
+      if (dx < 8 && dy < 8) return;
+      if (dy >= dx) {
+        // Gesto verticale → scroll, abbandona definitivamente
         pendingRef.current = false;
-        return;
+        activeRef.current  = false;
+        return; // non bloccare, lascia propagare lo scroll
       }
       // Gesto orizzontale confermato → attiva crosshair
       pendingRef.current = false;
@@ -400,7 +401,7 @@ const useDragCrosshair = () => {
     }
 
     if (!activeRef.current) return;
-    e.preventDefault(); // blocca scroll solo quando crosshair è attivo
+    e.preventDefault(); // blocca scroll solo quando orizzontale confermato
     const idx = getIndexFromX(clientX);
     if (idx !== null) setCrosshair({ index: idx, x: clientX, y: clientY });
   }, [getIndexFromX]);
@@ -468,7 +469,7 @@ const DragChart = ({ C, data, height, children, labelKey, valueKey, valuePrefix=
     : null;
 
   return (
-    <div style={{ position: 'relative', userSelect: 'none', touchAction: 'pan-x' }}>
+    <div style={{ position: 'relative', userSelect: 'none', touchAction: 'pan-y' }}>
       <div ref={containerRef} style={{ cursor: 'crosshair', position: 'relative' }}>
         {children}
         {/* SVG overlay crosshair — sempre delle stesse dimensioni del container */}
@@ -4345,43 +4346,25 @@ const SETTINGS_DEFAULTS = {
 export default function TradingApp() {
   useEffect(() => { injectGlobalCSS(); injectPressManager(); }, []);
 
-  // Ricalcola --app-height al mount React (quando la PWA è a regime)
-  // e al pageshow (torna da background)
+  // Altezza reale in state React — unico modo per forzare il wrapper a ridisegnarsi.
+  // CSS vars su documentElement non triggano re-render, per questo il nero persisteva.
+  const getH = () => {
+    const isStandalone =
+      ('standalone' in navigator && navigator.standalone === true) ||
+      window.matchMedia('(display-mode: standalone)').matches;
+    return isStandalone ? screen.height : window.innerHeight;
+  };
+  const [appHeight, setAppHeight] = useState(() => getH());
   useEffect(() => {
-    function recalcHeight() {
-      const isStandalone =
-        ('standalone' in navigator && navigator.standalone === true) ||
-        window.matchMedia('(display-mode: standalone)').matches;
-
-      let h;
-      if (isStandalone) {
-        const visualH = window.visualViewport ? Math.round(window.visualViewport.height) : 0;
-        const innerH = window.innerHeight;
-        const screenH = Math.round(screen.height);
-        if (visualH > 500) h = visualH;
-        else if (innerH > 800) h = innerH;
-        else h = screenH;
-      } else {
-        h = window.innerHeight;
-      }
-      document.documentElement.style.setProperty('--app-height', `${h}px`);
-      document.documentElement.style.setProperty('--vh', `${h * 0.01}px`);
-    }
-
-    // Al mount: ricalcola subito e dopo breve delay (iOS può essere lento)
-    recalcHeight();
-    const t1 = setTimeout(recalcHeight, 100);
-    const t2 = setTimeout(recalcHeight, 500);
-
-    const onPageshow = () => setTimeout(recalcHeight, 50);
-    window.addEventListener('pageshow', onPageshow);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      window.removeEventListener('pageshow', onPageshow);
-    };
+    const update = () => setAppHeight(getH());
+    update();
+    const t = setTimeout(update, 300);
+    window.addEventListener('pageshow', update);
+    window.addEventListener('resize', update);
+    return () => { clearTimeout(t); window.removeEventListener('pageshow', update); window.removeEventListener('resize', update); };
   }, []);
+
+
 
   // ── Dati reali da Supabase ──────────────────────────
   const { loading: sbLoading, error: sbError, trades: sbTrades,
@@ -4445,10 +4428,7 @@ export default function TradingApp() {
 
       position: 'fixed',
       top: 0, left: 0, right: 0,
-      // --app-height viene aggiornato da main.jsx + useEffect qui sotto.
-      // minHeight: 100dvh è il safety net se il JS non ha ancora girato.
-      height: 'var(--app-height, 100dvh)',
-      minHeight: '100dvh',
+      height: appHeight,
 
       display: 'flex', flexDirection: 'column',
     }}>
@@ -4558,7 +4538,7 @@ export default function TradingApp() {
       {/* BOTTOM TAB BAR */}
       <div className="fixed left-1/2 z-50" style={{
         transform: 'translateX(-50%)',
-        bottom: 'max(env(safe-area-inset-bottom, 12px), 8px)',
+        bottom: 'max(env(safe-area-inset-bottom, 4px), 4px)',
       }}>
         <div style={{
           background: C.glassBar,
