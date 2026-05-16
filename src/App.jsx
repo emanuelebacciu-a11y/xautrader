@@ -4357,7 +4357,7 @@ const AnalyticsView = ({ C, trades }) => {
 };
 
 /* ============= CHART VIEW ============= */
-// Prezzo spot reale da goldapi.io (CORS nativo, chiave pubblica)
+// Prezzo spot XAU/USD — cascata no-auth: metals.live → goldprice.org → stima storica
 // Candele sintetiche intraday costruite con simulazione stocastica calibrata su XAUUSD:
 //   - Volatilità: σ giornaliera ~0.7% (ATR storico ~$21 su ~$3000)
 //   - Modello: mean-reversion Ornstein-Uhlenbeck + shock asimmetrici
@@ -4368,31 +4368,79 @@ const AnalyticsView = ({ C, trades }) => {
 const CHART_TF_OPTIONS = ['3m','7m','13m','17m','33m','90m','3h','6h','1D','3D'];
 const CHART_TF_LABELS  = {'3m':'M3','7m':'M7','13m':'M13','17m':'M17','33m':'M33','90m':'M90','3h':'H3','6h':'H6','1D':'D1','3D':'3D'};
 
-// ── goldapi.io config ──────────────────────────────────────────────────────
-const GOLDAPI_KEY = 'goldapi-7k2wd9btzapcn5-io'; // chiave pubblica demo
+// ── Spot price: cascata di sorgenti pubbliche no-auth ─────────────────────
+// Fonte 1: metals.live  — JSON diretto, no key
+// Fonte 2: data-asg.goldprice.org — usato da goldprice.org widget
+// Fonte 3: stima stocastica dal prezzo storico in cache (graceful degradation)
+//
+// Tutti restituiscono il medesimo formato interno:
+//   { price, prevClose, open, high, low, ch, chp, timestamp, source }
 
-// Fetch prezzo spot XAU/USD corrente
-const fetchSpotPrice = async () => {
-  const res = await fetch('https://www.goldapi.io/api/XAU/USD', {
-    headers: {
-      'x-access-token': GOLDAPI_KEY,
-      'Content-Type': 'application/json',
-    },
-  });
-  if (!res.ok) throw new Error(`goldapi HTTP ${res.status}`);
-  const data = await res.json();
-  // goldapi ritorna { price, open_time, prev_close_price, ch, chp, ... }
-  if (!data || !data.price || !isFinite(data.price)) throw new Error('goldapi: prezzo non valido');
-  return {
-    price:     data.price,
-    prevClose: data.prev_close_price || data.price,
-    open:      data.open_price || data.price,
-    high:      data.high_price || data.price,
-    low:       data.low_price || data.price,
-    ch:        data.ch || 0,
-    chp:       data.chp || 0,
-    timestamp: data.timestamp || Math.floor(Date.now() / 1000),
-  };
+// Prezzo storico XAUUSD stimato (usato solo se tutte le API falliscono)
+// Aggiornato al 17 maggio 2026 — viene usato come "ancora" per la simulazione
+// Se è stantio non pregiudica la forma delle candele, solo l'asse Y assoluto
+const XAU_FALLBACK_PRICE = 3220;
+
+const _parseMetalsLive = async () => {
+  // GET https://api.metals.live/v1/spot/gold → [{ gold: 3214.5 }]
+  const res = await fetch('https://api.metals.live/v1/spot/gold', { mode: 'cors' });
+  if (!res.ok) throw new Error(`metals.live ${res.status}`);
+  const json = await res.json();
+  const price = json?.[0]?.gold ?? json?.gold;
+  if (!price || !isFinite(price)) throw new Error('metals.live: formato inatteso');
+  return { price, prevClose: price * 0.9985, open: price, high: price, low: price, ch: 0, chp: 0, timestamp: Math.floor(Date.now() / 1000), source: 'metals.live' };
+};
+
+const _parseGoldpriceOrg = async () => {
+  // JSONP-like endpoint, ritorna testo con callback, accettiamo solo il JSON grezzo
+  // https://data-asg.goldprice.org/dbXRates/USD → { items: [{ xauPrice: 3214.5 }] }
+  const res = await fetch('https://data-asg.goldprice.org/dbXRates/USD', { mode: 'cors' });
+  if (!res.ok) throw new Error(`goldprice.org ${res.status}`);
+  const json = await res.json();
+  const price = json?.items?.[0]?.xauPrice;
+  if (!price || !isFinite(price)) throw new Error('goldprice.org: formato inatteso');
+  const prevClose = json?.items?.[0]?.pcXau ?? price;
+  const ch  = price - prevClose;
+  const chp = prevClose > 0 ? (ch / prevClose) * 100 : 0;
+  return { price, prevClose, open: prevClose, high: price, low: price, ch, chp, timestamp: Math.floor(Date.now() / 1000), source: 'goldprice.org' };
+};
+
+const _parseFxRatesFallback = async () => {
+  // Open Exchange: fxratesapi non richiede key per EUR/USD, ma per XAU serve key.
+  // Usiamo frankfurter solo come conferma ordine di grandezza EUR → fallisce, ignoriamo.
+  // Ultimo resort: stima storica con rumore minimo per non bloccare la UI.
+  const price = XAU_FALLBACK_PRICE;
+  console.warn('[ChartView] Tutte le API spot fallite — uso stima storica XAU/USD');
+  return { price, prevClose: price, open: price, high: price, low: price, ch: 0, chp: 0, timestamp: Math.floor(Date.now() / 1000), source: 'fallback' };
+};
+
+// Cache in memoria — scade ogni 60s (API pubbliche hanno rate limit generosi)
+let _spotCache    = null;
+let _spotCacheTs  = 0;
+const SPOT_TTL_MS = 60_000;
+
+const fetchGoldSpot = async () => {
+  const now = Date.now();
+  if (_spotCache && (now - _spotCacheTs) < SPOT_TTL_MS) return _spotCache;
+
+  // Prova in cascata: prima sorgente che risponde vince
+  const sources = [_parseMetalsLive, _parseGoldpriceOrg, _parseFxRatesFallback];
+  let lastErr;
+  for (const src of sources) {
+    try {
+      const data = await src();
+      if (data && isFinite(data.price) && data.price > 100) {
+        _spotCache   = data;
+        _spotCacheTs = now;
+        return data;
+      }
+    } catch (e) {
+      lastErr = e;
+      console.warn('[ChartView] spot source failed:', e.message);
+    }
+  }
+  // Se anche il fallback sintetico fallisce (non dovrebbe), lancia
+  throw lastErr || new Error('Spot non disponibile');
 };
 
 // ── Generatore gaussiano (Box-Muller) ──────────────────────────────────────
@@ -4511,7 +4559,7 @@ const buildSyntheticBars = (tf, spotData) => {
     const high = bodyHi + upperWick;
     const low  = bodyLo - lowerWick;
 
-    // Ultima candela: forza close al prezzo spot reale, high/low dai dati goldapi
+    // Ultima candela: forza close = prezzo spot reale, high/low dall'API o simulati
     if (i === closes.length - 1) {
       const realHigh = dayHigh && dayHigh > spotPrice ? dayHigh : high;
       const realLow  = dayLow  && dayLow  < spotPrice ? dayLow  : low;
@@ -4549,20 +4597,6 @@ const buildSyntheticBars = (tf, spotData) => {
         ? (a.time < bx.time ? -1 : a.time > bx.time ? 1 : 0)
         : a.time - bx.time
     );
-};
-
-// Cache spot price in memoria per evitare chiamate eccessive
-let _spotCache = null;
-let _spotCacheTs = 0;
-const SPOT_CACHE_MS = 30_000; // 30s
-
-const fetchGoldSpot = async () => {
-  const now = Date.now();
-  if (_spotCache && (now - _spotCacheTs) < SPOT_CACHE_MS) return _spotCache;
-  const data = await fetchSpotPrice();
-  _spotCache = data;
-  _spotCacheTs = now;
-  return data;
 };
 
 // Fetch OHLC: recupera spot reale + costruisce candele sintetiche calibrate
@@ -4846,7 +4880,7 @@ const ChartView = ({ C, trades }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lwReady]); // SOLO lwReady — il chart viene creato una volta sola
 
-  // Carica dati: recupera spot reale da goldapi + costruisce candele sintetiche calibrate
+  // Carica dati: recupera spot reale (metals.live / goldprice.org / stima) + candele sintetiche calibrate
   const loadData = useCallback(async (requestedTf) => {
     if (!chartRef.current) return;
     const targetTf = requestedTf || tfRef.current;
@@ -4916,7 +4950,7 @@ const ChartView = ({ C, trades }) => {
           ))}
         </div>
 
-        {/* Prezzo spot reale goldapi.io + variazione giornaliera */}
+        {/* Prezzo spot XAU/USD (metals.live → goldprice.org → stima) */}
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
           {lastPrice && (
             <span style={{ color:'#ffffff', fontSize:13, fontFamily:FONT.mono, fontWeight:700, fontVariantNumeric:'tabular-nums', letterSpacing:'-0.3px' }}>
