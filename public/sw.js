@@ -1,4 +1,4 @@
-const CACHE_NAME = 'xautrader-v1.1';
+const CACHE_NAME = 'journal-v1.3';
 const STATIC_ASSETS = ['/', '/index.html', '/manifest.json'];
 
 // Install — pre-cache shell

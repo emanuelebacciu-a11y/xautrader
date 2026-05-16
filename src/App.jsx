@@ -918,7 +918,10 @@ const computeAllStats = (trades) => {
   }).filter(s=>s.trades>0);
 
   const breakDay = ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].map((name,i) => {
-    const t = closed.filter(tr=>(new Date(tr.date).getDay()+6)%7===i);
+    const t = closed.filter(tr=>{
+      const p=(tr.date||'').split('-');
+      return p.length===3?(new Date(+p[0],+p[1]-1,+p[2]).getDay()+6)%7===i:false;
+    });
     const w = t.filter(tr=>tr.pnl>0).length;
     const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
     const r = t.filter(tr=>tr.rr>0).map(tr=>tr.rr);
@@ -942,9 +945,10 @@ const computeAllStats = (trades) => {
 
   const breakHour = Array.from({length:24},(_,h) => {
     const t = closed.filter(tr => {
-      if (!tr.timeEntry) return false;
-      const utcH = parseInt((tr.timeEntry||'00:00').split(':')[0]);
-      return ((utcH+2)%24)===h; // AMS DST semplificato
+      const te = tr.timeEntry || tr.time_entry || '';
+      if (!te) return false;
+      const utcH = parseInt(te.split(':')[0])||0;
+      return ((utcH+2)%24)===h;
     });
     const w = t.filter(tr=>tr.pnl>0).length;
     const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
@@ -964,7 +968,12 @@ const computeAllStats = (trades) => {
   const SESS = ['ASIAN','FRANKFURT','LONDON','NEWYORK'];
   const matrixData = DAYS.map((_,di) =>
     SESS.map(s => {
-      const t = closed.filter(tr=>(new Date(tr.date).getDay()+6)%7===di && (tr.session||'').toUpperCase()===s);
+      const t = closed.filter(tr=>{
+        // Parse manuale: evita timezone offset di new Date('YYYY-MM-DD')
+        const parts = (tr.date||'').split('-');
+        const dow = parts.length===3 ? new Date(+parts[0],+parts[1]-1,+parts[2]).getDay() : -1;
+        return (dow+6)%7===di && (tr.session||'').toUpperCase()===s;
+      });
       const w = t.filter(tr=>tr.pnl>0).length;
       const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
       const r = t.filter(tr=>tr.rr>0).map(tr=>tr.rr);
@@ -980,7 +989,7 @@ const computeAllStats = (trades) => {
     const sgw = slice.filter(t=>t.pnl>0).reduce((s,t)=>s+(t.pnl||0),0);
     const sgl = Math.abs(slice.filter(t=>t.pnl<0).reduce((s,t)=>s+(t.pnl||0),0));
     const sm = slice.reduce((s,t)=>s+(t.pnl||0),0)/Math.max(slice.length,1);
-    const sv = slice.reduce((s,t)=>s+(t.pnl-sm)**2,0)/Math.max(slice.length,1);
+    const sv = slice.reduce((s,t)=>s+((t.pnl||0)-sm)**2,0)/Math.max(slice.length,1);
     const ss = Math.sqrt(sv);
     return { period:`${k}T`, sharpe:ss>0?sm/ss:0, pf:sgl>0?sgw/sgl:0, wr:slice.length?Math.round(sw/slice.length*100):0 };
   });
@@ -3024,20 +3033,21 @@ const TemporalView = ({ C, trades, equity }) => {
 
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [calYear,  setCalYear]  = useState(new Date().getFullYear());
-  const [calInit,  setCalInit]  = useState(false);
-  // Vai al mese dell'ultimo trade quando i dati arrivano
+  // Vai al mese dell'ultimo trade quando i dati arrivano (solo al primo caricamento)
+  const calInited = React.useRef(false);
   useEffect(() => {
-    if (calInit || !trades || trades.length === 0) return;
+    if (calInited.current || !trades || trades.length === 0) return;
     const closed = trades.filter(t => !t.open && t.date && t.date.length >= 10);
     if (closed.length === 0) return;
     const last = closed.reduce((a,b) => a.date > b.date ? a : b);
-    const d = new Date(last.date + 'T12:00:00');
-    if (!isNaN(d)) {
+    const parts = last.date.split('-');
+    if (parts.length === 3) {
+      const d = new Date(+parts[0], +parts[1]-1, +parts[2]);
       setCalYear(d.getFullYear());
       setCalMonth(d.getMonth());
-      setCalInit(true);
+      calInited.current = true;
     }
-  }, [trades, calInit]);
+  }, [trades]);
 
   const tradesByDate = useMemo(() => allTrades.filter(t=>t.date&&t.date.length>=10).reduce((acc,t) => {
     const key = t.date.slice(0,10); // normalizza sempre a YYYY-MM-DD
