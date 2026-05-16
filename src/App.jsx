@@ -694,21 +694,26 @@ const mapRow = (e, idx) => {
 const groupTrades = rows => {
   const map = {};
   rows.forEach(r => {
-    if (!map[r.basket]) map[r.basket] = { parent: null, partials: [] };
+    const key = r.basket || `auto-${r.id}`;
+    if (!map[key]) map[key] = { parent: null, partials: [] };
+    r = { ...r, basket: key }; // normalizza basket
     // Se partialIndex è 0 o non definito → è il parent
-    if (!r.partialIndex || r.partialIndex === 0) map[r.basket].parent = r;
+    if (!r.partialIndex || r.partialIndex === 0) map[key].parent = r;
     else {
-      map[r.basket].partials.push(...r.partials);
-      if (map[r.basket].parent) {
-        map[r.basket].parent.pnl      += r.pnl;
-        map[r.basket].parent.pnlNetto += r.pnlNetto;
+      const key2 = r.basket;
+      if (map[key2]) {
+        map[key2].partials.push(...(r.partials||[]));
+        if (map[key2].parent) {
+          map[key2].parent.pnl      = (map[key2].parent.pnl||0) + (r.pnl||0);
+          map[key2].parent.pnlNetto = (map[key2].parent.pnlNetto||0) + (r.pnlNetto||0);
+        }
       }
     }
   });
   const out = [];
   Object.values(map).forEach(({ parent, partials }) => {
     if (!parent) return;
-    parent.partials = partials.sort((a, b) =>
+    parent.partials = (parent.partials || []).concat(partials).sort((a, b) =>
       (a.date || '').localeCompare(b.date || '') || (a.time || '').localeCompare(b.time || ''));
     out.push(parent);
   });
@@ -2895,16 +2900,16 @@ const buildCalData = (year, month, tradesByDate = {}) => {
     const dateKey = `${year}-${String(month+1).padStart(2,'0')}-${String(dayNum).padStart(2,'0')}`;
     const dayTrades = tradesByDate[dateKey] || [];
     const closedTrades = dayTrades.filter(t=>!t.open);
-    const pnl = dayTrades.length > 0
-      ? closedTrades.reduce((s,t)=>s+(t.pnl||0), 0)
-      : 0;
-    const openTrades = dayTrades.filter(t=>t.open);
+    const openTrades   = dayTrades.filter(t=>t.open);
+    const pnl = closedTrades.reduce((s,t)=>s+(t.pnl||0), 0);
+    // Mostra il giorno anche se ha solo trade aperti (pnl=0 ma openCount>0)
     return {
       day: dayNum, dateKey, pnl,
       trades: dayTrades,
       openCount: openTrades.length,
-      tradeCount: dayTrades.length || (pnl !== 0 ? 1 : 0),
-      closedCount: dayTrades.filter(t=>!t.open).length,
+      tradeCount: dayTrades.length,
+      closedCount: closedTrades.length,
+      hasAny: dayTrades.length > 0,
     };
   });
 };
@@ -3230,8 +3235,8 @@ const TemporalView = ({ C, trades, equity }) => {
 
             return (
               <div key={i}
-                onClick={()=>{if(c.pnl!==0||hasOpen){haptic.light();setSelectedDay(isSelected?null:c);}}}
-                className={`flex flex-col justify-between relative xt-cal-cell ${hasOpen?'xt-cal-open':''} ${(c.pnl!==0||hasOpen)?'':''}`.trim()}
+                onClick={()=>{if(c.hasAny||c.pnl!==0){haptic.light();setSelectedDay(isSelected?null:c);}}}
+                className={`flex flex-col justify-between relative xt-cal-cell ${hasOpen?'xt-cal-open':''}`.trim()}
                 style={{
                   aspectRatio:'1',
                   background: hasOpen?`linear-gradient(135deg,${C.orange}14,${C.orange}08)`:c.pnl!==0?`${baseColor}${bgAlphaHex}`:C.glass2,
