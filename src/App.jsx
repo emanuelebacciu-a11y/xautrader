@@ -797,9 +797,9 @@ const computeAllStats = (trades) => {
   const exp    = total / n;
   const rrs    = closed.filter(t=>t.rr>0).map(t=>t.rr);
   const avgRR  = rrs.length ? rrs.reduce((s,r)=>s+r,0)/rrs.length : 0;
-  const bestRR = rrs.length ? Math.max(...rrs) : 0;
-  const lgWin  = wins.length   ? Math.max(...wins.map(t=>t.pnl))   : 0;
-  const lgLos  = losses.length ? Math.max(...losses.map(t=>t.pnl)) : 0;
+  const bestRR = rrs.length ? rrs.reduce((a,b)=>a>b?a:b,0) : 0;
+  const lgWin  = wins.length   ? wins.reduce((a,b)=>a.pnl>b.pnl?a:b).pnl   : 0;
+  const lgLos  = losses.length ? losses.reduce((a,b)=>a.pnl<b.pnl?a:b).pnl : 0;
 
   // Equity curve
   const BALANCE_INIT = 10000;
@@ -839,12 +839,12 @@ const computeAllStats = (trades) => {
   const zscore = stdDev > 0 ? (mean/stdDev)*Math.sqrt(n) : 0;
 
   // MAE / MFE
-  const maes = closed.filter(t=>t.mae).map(t=>t.mae);
-  const mfes = closed.filter(t=>t.mfe).map(t=>t.mfe);
+  const maes = closed.filter(t=>t.mae && t.mae!==0).map(t=>t.mae);
+  const mfes = closed.filter(t=>t.mfe && t.mfe!==0).map(t=>t.mfe);
   const avgMAE = maes.length ? maes.reduce((s,v)=>s+v,0)/maes.length : 0;
   const avgMFE = mfes.length ? mfes.reduce((s,v)=>s+v,0)/mfes.length : 0;
-  const maxMAE = maes.length ? Math.min(...maes) : 0;
-  const maxMFE = mfes.length ? Math.max(...mfes) : 0;
+  const maxMAE = maes.length ? maes.reduce((a,b)=>a<b?a:b, 0) : 0;
+  const maxMFE = mfes.length ? mfes.reduce((a,b)=>a>b?a:b, 0) : 0;
   const mfeMaeRatio = avgMAE < 0 ? Math.abs(avgMFE/avgMAE) : 0;
   const edgeCaptured = avgMFE > 0 ? Math.min((avgWin/avgMFE)*100, 100) : 0;
 
@@ -882,8 +882,9 @@ const computeAllStats = (trades) => {
 
   // Best/Worst day
   const dayEntries = Object.entries(byDate);
-  const bestDay  = dayEntries.length ? dayEntries.reduce((a,b)=>b[1]>a[1]?b:a) : null;
-  const worstDay = dayEntries.filter(([,v])=>v<0).length ? dayEntries.filter(([,v])=>v<0).reduce((a,b)=>b[1]<a[1]?b:a) : null;
+  const bestDay  = dayEntries.length > 0 ? dayEntries.reduce((a,b)=>b[1]>a[1]?b:a) : null;
+  const lossDays = dayEntries.filter(([,v])=>v<0);
+  const worstDay = lossDays.length > 0 ? lossDays.reduce((a,b)=>b[1]<a[1]?b:a) : null;
 
   // Avg holding
   const durs = closed.filter(t=>t.duration>0).map(t=>t.duration);
@@ -958,6 +959,7 @@ const computeAllStats = (trades) => {
   // Rolling (30/60/90 trades)
   const rolling = [30,60,90].map(k => {
     const slice = sorted.slice(-k);
+    if (slice.length < 3) return { period:`${k}T`, sharpe:0, pf:0, wr:0 };
     const sw = slice.filter(t=>t.pnl>0).length;
     const sgw = slice.filter(t=>t.pnl>0).reduce((s,t)=>s+t.pnl,0);
     const sgl = Math.abs(slice.filter(t=>t.pnl<0).reduce((s,t)=>s+t.pnl,0));
@@ -1169,8 +1171,8 @@ const GlassInset = ({ C, children, className='', padding='p-3', style={} }) => (
 );
 
 const Sparkline = ({ data, color, height = 28 }) => {
-  const min = Math.min(...data);
-  const max = Math.max(...data);
+  const min = data.length ? Math.min(...data) : 0;
+  const max = data.length ? Math.max(...data) : 1;
   const norm = (v) => max === min ? 0.5 : (v - min) / (max - min);
   const w = 72;
   const padding = 2;
@@ -3012,7 +3014,7 @@ const TemporalView = ({ C, trades, equity }) => {
   const [period, setPeriod] = useState('Mese');
   const [selectedDay, setSelectedDay] = useState(null);
 
-  const maxAbsPnl = useMemo(() => Math.max(...calData.map(c=>Math.abs(c.pnl)).filter(v=>v>0), 1), [calData]);
+  const maxAbsPnl = useMemo(() => { const vals = calData.map(c=>Math.abs(c.pnl)).filter(v=>v>0); return vals.length ? Math.max(...vals) : 1; }, [calData]);
 
   const handlePeriodChange = (p) => { setPeriod(p); setSelectedDay(null); window.scrollTo({ top: 0, behavior: 'instant' }); };
 
@@ -3745,7 +3747,7 @@ const StatsView = ({ C, trades }) => {
 const AnnualHeatmap = ({ C, data }) => {
   const all    = data || [];
   const maxV   = Math.max(...all.map(d=>Math.abs(d.pnl)), 1);
-  const weeks  = Math.max(...all.map(d=>d.week)) + 1;
+  const weeks  = all.length ? Math.max(...all.map(d=>d.week)) + 1 : 53;
   const months = ['Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic','Gen','Feb','Mar','Apr','Mag'];
   const [tooltip, setTooltip] = useState(null); // {date, pnl, x, y}
 
@@ -3843,7 +3845,14 @@ const AnnualHeatmap = ({ C, data }) => {
 
 /* ============= STREAK DISTRIBUTION ============= */
 const StreakDistribution = ({ C, data }) => {
-  if (!data || data.length === 0) return null;
+  if (!data || data.length === 0) return (
+    <Glass C={C}>
+      <SectionHeader C={C}>Distribuzione Streak</SectionHeader>
+      <div style={{color:C.tertiary,fontSize:12,fontFamily:FONT.text,padding:'24px 4px',textAlign:'center',opacity:0.7}}>
+        Appare quando hai almeno 3 trade chiusi consecutivi.
+      </div>
+    </Glass>
+  );
   return (
     <Glass C={C}>
       <SectionHeader C={C}>Distribuzione Streak</SectionHeader>
@@ -3872,9 +3881,17 @@ const StreakDistribution = ({ C, data }) => {
 /* ============= MAE/MFE SCATTER ============= */
 const MaeMfeScatter = ({ C, data }) => {
   const pts = (data || []).filter(t => t.mae || t.mfe).map((t,i) => ({id:i,mae:t.mae||0,mfe:t.mfe||0,pnl:t.pnl,label:t.basket||`T${i+1}`}));
-  if (pts.length === 0) return null;
-  const max = Math.max(...pts.map(d=>Math.abs(d.mfe)), 1);
-  const minM = Math.min(...pts.map(d=>d.mae));
+  if (pts.length === 0) return (
+    <Glass C={C}>
+      <SectionHeader C={C}>MAE / MFE Scatter</SectionHeader>
+      <div style={{color:C.tertiary,fontSize:12,fontFamily:FONT.text,padding:'24px 4px',textAlign:'center',opacity:0.7}}>
+        Appare quando i trade hanno dati MAE/MFE.<br/>
+        <span style={{fontSize:10,opacity:0.6}}>Inviati dall'EA MT5 via webhook.</span>
+      </div>
+    </Glass>
+  );
+  const max = pts.length ? Math.max(...pts.map(d=>Math.abs(d.mfe)||1), 1) : 1;
+  const minM = pts.length ? Math.min(...pts.map(d=>d.mae||0)) : -1;
   const W = 320, H = 220, PX = 40, PY = 20;
 
   const xScale = (v) => PX + ((v - minM) / (-minM)) * (W - PX - 10);
@@ -3919,9 +3936,17 @@ const MaeMfeScatter = ({ C, data }) => {
 /* ============= P&L DISTRIBUTION ============= */
 const PnlDistribution = ({ C, data }) => {
   const trades = data || [];
-  if (trades.length === 0) return null;
-  const pnls = trades.map(t => t.pnl);
-  const minP = Math.min(...pnls), maxP = Math.max(...pnls);
+  if (trades.length === 0) return (
+    <Glass C={C}>
+      <SectionHeader C={C}>Distribuzione P&L</SectionHeader>
+      <div style={{color:C.tertiary,fontSize:12,fontFamily:FONT.text,padding:'24px 4px',textAlign:'center',opacity:0.7}}>
+        Appare dopo i primi trade chiusi.
+      </div>
+    </Glass>
+  );
+  const pnls = trades.map(t => t.pnl||0);
+  const minP = pnls.length ? Math.min(...pnls) : -50;
+  const maxP = pnls.length ? Math.max(...pnls) : 50;
   const step = Math.max(Math.ceil((maxP - minP) / 12 / 20) * 20, 20);
   const bins = [];
   for (let v = Math.floor(minP/step)*step; v <= maxP + step; v += step) bins.push(v);
@@ -3993,8 +4018,10 @@ const AnalyticsView = ({ C, trades }) => {
       if (t.pnl > 0) { cw++; cl=0; wins[cw]=(wins[cw]||0)+1; }
       else            { cl++; cw=0; losses[cl]=(losses[cl]||0)+1; }
     });
-    const maxW = Math.max(...Object.keys(wins).map(Number), 0);
-    const maxL = Math.max(...Object.keys(losses).map(Number), 0);
+    const wKeys = Object.keys(wins).map(Number);
+    const lKeys = Object.keys(losses).map(Number);
+    const maxW = wKeys.length ? Math.max(...wKeys) : 0;
+    const maxL = lKeys.length ? Math.max(...lKeys) : 0;
     return [
       ...Array.from({length:Math.min(maxW,7)},(_,i)=>({len:`${i+1}W`,count:wins[i+1]||0,type:'win'})),
       ...Array.from({length:Math.min(maxL,5)},(_,i)=>({len:`${i+1}L`,count:losses[i+1]||0,type:'loss'})),
