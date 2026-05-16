@@ -3858,63 +3858,66 @@ const AnnualHeatmap = ({ C, data }) => {
         Heatmap Annuale
       </SectionHeader>
       <div style={{overflowX:'auto', position:'relative'}} onClick={()=>setTooltip(null)}>
-        {/* Tooltip mobile */}
         {tooltip && (
           <div style={{
-            position:'absolute', top: tooltip.y, left: Math.min(tooltip.x, 200),
-            background: C.glass3, border:`0.5px solid ${tooltip.pnl>=0?C.green:C.red}55`,
-            borderRadius: RADIUS.inset, padding:'6px 10px', zIndex:50,
-            backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)',
+            position:'fixed',
+            top: tooltip.vy - 48, left: Math.max(8, Math.min(tooltip.vx - 40, window.innerWidth - 140)),
+            background: C.glass2, border:`0.5px solid ${(tooltip.pnl||0)>=0?C.green:C.red}66`,
+            borderRadius: RADIUS.inset, padding:'6px 10px', zIndex:100,
+            backdropFilter:'blur(16px)', WebkitBackdropFilter:'blur(16px)',
             pointerEvents:'none', whiteSpace:'nowrap',
-            boxShadow:`0 4px 20px ${tooltip.pnl>=0?C.green:C.red}25`,
           }}>
             <div style={{color:C.tertiary,fontSize:9,fontFamily:FONT.mono}}>{tooltip.date}</div>
-            <div style={{color:tooltip.pnl>=0?C.green:C.red,fontSize:14,fontFamily:FONT.mono,fontWeight:700,fontVariantNumeric:'tabular-nums'}}>
-              {(tooltip.pnl??0)>=0?'+':''}${(+(tooltip.pnl??0)).toFixed(2)}
+            <div style={{color:(tooltip.pnl||0)>=0?C.green:C.red,fontSize:14,fontFamily:FONT.mono,fontWeight:700}}>
+              {(tooltip.pnl||0)>=0?'+':''}${Math.abs(tooltip.pnl||0).toFixed(2)}
             </div>
           </div>
         )}
-        <div style={{minWidth: weeks * 13}}>
-          {/* Month labels */}
-          <div style={{display:'flex',marginBottom:4,paddingLeft:20}}>
-            {Array.from({length:13},(_,m)=>(
-              <div key={m} style={{width: m < 12 ? `${Math.floor(weeks/13)*13}px` : 'auto', color:C.tertiary, fontSize:9, fontFamily:FONT.mono, fontWeight:600, flexShrink:0}}>{months[m]}</div>
+        <div style={{minWidth: LABEL_W + gridW, paddingBottom: 4}}>
+          {/* Mesi dinamici */}
+          <div style={{display:'flex', marginBottom:3, marginLeft: LABEL_W}}>
+            {monthLabels.map(({label, week}, i) => (
+              <div key={i} style={{
+                position:'absolute',
+                left: LABEL_W + week * (CELL+GAP),
+                fontSize:9, fontFamily:FONT.mono, color:C.tertiary, fontWeight:600,
+              }}>{label}</div>
             ))}
+            <div style={{height:12}}/>
           </div>
-          <div style={{display:'flex',gap:0}}>
-            {/* Day labels */}
-            <div style={{display:'flex',flexDirection:'column',gap:1.5,marginRight:4}}>
-              {['L','M','M','G','V','S','D'].map((d,i)=>(
-                <div key={i} style={{height:10,fontSize:7,fontFamily:FONT.mono,color:C.tertiary,display:'flex',alignItems:'center'}}>{i%2===1?d:''}</div>
+          <div style={{display:'flex', gap:0, marginTop:14}}>
+            {/* Day labels L M M G V S D */}
+            <div style={{display:'flex', flexDirection:'column', gap:GAP, width:LABEL_W, marginRight:2, paddingTop:0}}>
+              {['L','','M','','G','','D'].map((d,i)=>(
+                <div key={i} style={{height:CELL, fontSize:7, fontFamily:FONT.mono,
+                  color:C.tertiary, display:'flex', alignItems:'center', lineHeight:1}}>
+                  {d}
+                </div>
               ))}
             </div>
-            {/* Grid */}
-            <div style={{display:'flex',gap:1.5}}>
-              {Array.from({length:weeks},(_,w)=>(
-                <div key={w} style={{display:'flex',flexDirection:'column',gap:1.5}}>
+            {/* Grid: colonne = settimane, righe = giorni (0=Lun…6=Dom) */}
+            <div style={{display:'flex', gap:GAP}}>
+              {Array.from({length:totalWeeks},(_,w)=>(
+                <div key={w} style={{display:'flex', flexDirection:'column', gap:GAP}}>
                   {[0,1,2,3,4,5,6].map(dow=>{
-                    const cell = all.find(d=>d.week===w && d.day===dow);
-                    if (!cell) return <div key={dow} style={{width:10,height:10}}/>;
+                    const cell = all.find(c=>c.week===w && c.day===dow);
+                    const hasTrade = cell && cell.pnl !== 0;
                     return (
                       <div key={dow}
-                        onClick={e => {
+                        onClick={e=>{
                           e.stopPropagation();
-                          if (cell.pnl === 0) return;
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          const parentRect = e.currentTarget.closest('[style*="overflow"]').getBoundingClientRect();
-                          setTooltip(t => t?.date === cell.date ? null : {
-                            date: cell.date, pnl: cell.pnl,
-                            x: rect.left - parentRect.left + 14,
-                            y: rect.top  - parentRect.top  + 14,
-                          });
+                          if (!hasTrade) return;
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setTooltip(t=>t?.date===cell.date?null:{
+                            date:cell.date, pnl:cell.pnl, vx:r.left, vy:r.top });
                         }}
                         style={{
-                          width:10, height:10, borderRadius:2.5,
-                          background: cellColor(cell.pnl),
-                          border:`0.5px solid ${cell.pnl===0?C.sep:'transparent'}`,
-                          cursor: cell.pnl !== 0 ? 'pointer' : 'default',
-                          transition:'transform 0.12s ease',
-                          transform: tooltip?.date===cell.date ? 'scale(1.6)' : 'scale(1)',
+                          width:CELL, height:CELL, borderRadius:2,
+                          background: cell ? cellColor(cell.pnl) : 'transparent',
+                          border: cell ? `0.5px solid ${hasTrade?'transparent':C.sep+'44'}` : 'none',
+                          cursor: hasTrade ? 'pointer' : 'default',
+                          transition:'transform 0.1s',
+                          transform: tooltip?.date===cell?.date ? 'scale(1.7)' : 'scale(1)',
                         }}
                       />
                     );
@@ -4090,16 +4093,34 @@ const PnlDistribution = ({ C, data }) => {
 const AnalyticsView = ({ C, trades }) => {
   const closed = (trades || []).filter(t => !t.open);
 
-  // Heatmap annuale: calcola da trade reali
+  // Heatmap annuale — GitHub-style, allineata alla settimana
   const annualHeatmapData = (() => {
     const byDate = {};
-    closed.forEach(t => { byDate[t.date] = (byDate[t.date]||0) + t.pnl; });
-    const start = new Date(); start.setFullYear(start.getFullYear()-1);
-    return Array.from({length:365},(_,i)=>{
-      const d = new Date(start); d.setDate(start.getDate()+i);
-      const date = d.toISOString().slice(0,10);
-      return { date, day:(d.getDay()+6)%7, week:Math.floor(i/7), pnl:byDate[date]||0 };
+    closed.forEach(t => {
+      const k = (t.date||'').slice(0,10);
+      if (k) byDate[k] = (byDate[k]||0) + (t.pnl||0);
     });
+    // Fine = oggi, inizio = 52 settimane fa allineato a Lunedì
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    // Trova il Lunedì di 52 settimane fa
+    const dow0 = (today.getDay()+6)%7; // 0=Lun
+    const end = new Date(today);
+    const start = new Date(today);
+    start.setDate(today.getDate() - 364 - dow0); // 52 settimane + offset a lunedì
+
+    const cells = [];
+    let week = 0;
+    const cur = new Date(start);
+    while (cur <= end) {
+      const dow = (cur.getDay()+6)%7; // 0=Lun … 6=Dom
+      if (dow === 0 && cur > start) week++;
+      const date = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
+      cells.push({ date, day: dow, week, pnl: byDate[date]||0,
+        month: cur.getMonth(), year: cur.getFullYear(), dom: cur.getDate() });
+      cur.setDate(cur.getDate()+1);
+    }
+    return cells;
   })();
 
   // Streak distribution dai trade reali
