@@ -4654,7 +4654,7 @@ const ChartView = ({ C, trades }) => {
       leftPriceScale: { visible: false },
       timeScale: {
         borderVisible:  false,
-        timeVisible:    true,
+        timeVisible:    !['1D','3D'].includes(tf),
         secondsVisible: false,
         rightOffset:    7,
         barSpacing:     8,
@@ -4735,6 +4735,7 @@ const ChartView = ({ C, trades }) => {
 
   useEffect(() => {
     if (!lwReady) return;
+    if (chartRef.current) chartRef.current.applyOptions({ timeScale: { timeVisible: !["1D","3D"].includes(tf) } });
     setLoading(true);
     const run = async () => {
       await new Promise(r => setTimeout(r, 100)); // attendi series init
