@@ -620,12 +620,18 @@ const _n = v => {
 const _d = v => {
   if (!v) return '';
   const s = String(v).trim();
-  // Supporta: '2026-05-15', '2026-05-15T00:00:00', '2026-05-15 10:30:00', '15/05/2026'
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  // ISO: 2026-05-15, 2026-05-15T10:30:00Z, 2026-05-15T10:30:00+02:00
+  const iso = s.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  // EU: 15/05/2026
   const eu = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
   if (eu) return `${eu[3]}-${eu[2]}-${eu[1]}`;
-  return s.slice(0, 10); // fallback: prendi i primi 10 char
+  // Timestamp numerico (ms)
+  if (/^\d{10,13}$/.test(s)) {
+    const d = new Date(s.length === 10 ? +s*1000 : +s);
+    return d.toISOString().slice(0,10);
+  }
+  return s.slice(0, 10);
 };
 
 // Mappa riga Supabase → oggetto trade compatibile con l'app
@@ -689,7 +695,8 @@ const groupTrades = rows => {
   const map = {};
   rows.forEach(r => {
     if (!map[r.basket]) map[r.basket] = { parent: null, partials: [] };
-    if (r.partialIndex === 0) map[r.basket].parent = r;
+    // Se partialIndex è 0 o non definito → è il parent
+    if (!r.partialIndex || r.partialIndex === 0) map[r.basket].parent = r;
     else {
       map[r.basket].partials.push(...r.partials);
       if (map[r.basket].parent) {
@@ -3027,7 +3034,12 @@ const TemporalView = ({ C, trades, equity }) => {
     }
   }, [trades, calInit]);
 
-  const tradesByDate = useMemo(() => allTrades.reduce((acc,t) => { if(!acc[t.date])acc[t.date]=[]; acc[t.date].push(t); return acc; }, {}), [allTrades]);
+  const tradesByDate = useMemo(() => allTrades.filter(t=>t.date&&t.date.length>=10).reduce((acc,t) => {
+    const key = t.date.slice(0,10); // normalizza sempre a YYYY-MM-DD
+    if(!acc[key])acc[key]=[];
+    acc[key].push({...t, date:key}); // forza date normalizzata
+    return acc;
+  }, {}), [allTrades]);
   const calData = useMemo(() => buildCalData(calYear, calMonth, tradesByDate), [calYear, calMonth, tradesByDate]);
 
   const [period, setPeriod] = useState('Mese');
@@ -3813,7 +3825,7 @@ const StatsView = ({ C, trades }) => {
 /* ============= ANNUAL HEATMAP ============= */
 const AnnualHeatmap = ({ C, data }) => {
   const all    = data || [];
-  const maxV   = Math.max(...all.map(d=>Math.abs(d.pnl)), 1);
+  const maxV   = (() => { const vals = all.map(d=>Math.abs(d.pnl||0)).filter(v=>v>0); return vals.length ? Math.max(...vals) : 1; })();
   const weeks  = all.length ? Math.max(...all.map(d=>d.week)) + 1 : 53;
   const months = ['Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic','Gen','Feb','Mar','Apr','Mag'];
   const [tooltip, setTooltip] = useState(null); // {date, pnl, x, y}
@@ -3948,6 +3960,8 @@ const StreakDistribution = ({ C, data }) => {
 /* ============= MAE/MFE SCATTER ============= */
 const MaeMfeScatter = ({ C, data }) => {
   const pts = (data || []).filter(t => t.mae || t.mfe).map((t,i) => ({id:i,mae:t.mae||0,mfe:t.mfe||0,pnl:t.pnl,label:t.basket||`T${i+1}`}));
+  const max  = pts.length ? Math.max(...pts.map(d => Math.abs(d.mfe) || 1), 1) : 1;
+  const minM = pts.length ? Math.min(...pts.map(d => d.mae || 0)) : -1;
   if (pts.length === 0) return (
     <Glass C={C}>
       <SectionHeader C={C}>MAE / MFE Scatter</SectionHeader>
@@ -3957,8 +3971,6 @@ const MaeMfeScatter = ({ C, data }) => {
       </div>
     </Glass>
   );
-  const max = pts.length ? Math.max(...pts.map(d=>Math.abs(d.mfe)||1), 1) : 1;
-  const minM = pts.length ? Math.min(...pts.map(d=>d.mae||0)) : -1;
   const W = 320, H = 220, PX = 40, PY = 20;
 
   const xScale = (v) => PX + ((v - minM) / (-minM)) * (W - PX - 10);
