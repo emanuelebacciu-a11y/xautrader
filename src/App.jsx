@@ -4345,6 +4345,44 @@ const SETTINGS_DEFAULTS = {
 export default function TradingApp() {
   useEffect(() => { injectGlobalCSS(); injectPressManager(); }, []);
 
+  // Ricalcola --app-height al mount React (quando la PWA è a regime)
+  // e al pageshow (torna da background)
+  useEffect(() => {
+    function recalcHeight() {
+      const isStandalone =
+        ('standalone' in navigator && navigator.standalone === true) ||
+        window.matchMedia('(display-mode: standalone)').matches;
+
+      let h;
+      if (isStandalone) {
+        const visualH = window.visualViewport ? Math.round(window.visualViewport.height) : 0;
+        const innerH = window.innerHeight;
+        const screenH = Math.round(screen.height);
+        if (visualH > 500) h = visualH;
+        else if (innerH > 800) h = innerH;
+        else h = screenH;
+      } else {
+        h = window.innerHeight;
+      }
+      document.documentElement.style.setProperty('--app-height', `${h}px`);
+      document.documentElement.style.setProperty('--vh', `${h * 0.01}px`);
+    }
+
+    // Al mount: ricalcola subito e dopo breve delay (iOS può essere lento)
+    recalcHeight();
+    const t1 = setTimeout(recalcHeight, 100);
+    const t2 = setTimeout(recalcHeight, 500);
+
+    const onPageshow = () => setTimeout(recalcHeight, 50);
+    window.addEventListener('pageshow', onPageshow);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      window.removeEventListener('pageshow', onPageshow);
+    };
+  }, []);
+
   // ── Dati reali da Supabase ──────────────────────────
   const { loading: sbLoading, error: sbError, trades: sbTrades,
           equity: sbEquity, lastSync, fromLocal, refetch } = useSupabaseData();
@@ -4407,7 +4445,7 @@ export default function TradingApp() {
 
       position: 'fixed',
       top: 0, left: 0, right: 0,
-      height: 'calc(var(--vh, 1vh) * 100)',
+      height: 'var(--app-height, 100dvh)',
 
       display: 'flex', flexDirection: 'column',
     }}>
