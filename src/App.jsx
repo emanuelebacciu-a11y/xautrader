@@ -3454,10 +3454,11 @@ const MatrixView = ({ C, matrixData }) => {
   const SESS = ['ASIAN','FRANKFURT','LONDON','NEWYORK'];
   const data = matrixData || DAYS.map(() => SESS.map(() => ({pnl:0,wr:0,rr:0,trades:0})));
   const allPnl = data.flat().map(c=>c.pnl).filter(v=>v!==0);
+  const maxPnl = allPnl.length ? Math.max(...allPnl.map(Math.abs)) : 1;
 
   const cellColor = (pnl) => {
     if (pnl === 0) return { bg: C.glass2, text: C.tertiary, border: C.sep };
-    const intensity = Math.min(Math.abs(pnl) / max, 1);
+    const intensity = Math.min(Math.abs(pnl) / maxPnl, 1);
     const alpha = Math.round(intensity * 55).toString(16).padStart(2,'0');
     if (pnl > 0) return { bg: `${C.green}${alpha}`, text: C.green, border: `${C.green}40` };
     return { bg: `${C.red}${alpha}`, text: C.red, border: `${C.red}40` };
@@ -3838,9 +3839,10 @@ const StatsView = ({ C, trades }) => {
 
 // 365 giorni per heatmap: gen-mag 2026 (143 giorni) + mock precedente
 /* ============= ANNUAL HEATMAP ============= */
-const AnnualHeatmap = ({ C, data }) => {
+const AnnualHeatmap = ({ C, data, year, setYear }) => {
   const all = data || [];
   const [tooltip, setTooltip] = useState(null);
+  const currentYear = new Date().getFullYear();
 
   // Costanti layout
   const CELL = 11, GAP = 2, LABEL_W = 18;
@@ -3879,7 +3881,18 @@ const AnnualHeatmap = ({ C, data }) => {
   return (
     <Glass C={C}>
       <SectionHeader C={C} action={
-        <span style={{color:C.secondary,fontSize:10,fontFamily:FONT.mono}}>Gen {year} — oggi</span>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <button onClick={()=>setYear(y=>y-1)} style={{
+            background:'none',border:`0.5px solid ${C.sep}`,borderRadius:6,
+            color:C.secondary,fontSize:12,cursor:'pointer',padding:'1px 7px',lineHeight:'20px',
+          }}>‹</button>
+          <span style={{color:C.secondary,fontSize:11,fontFamily:FONT.mono,fontWeight:600,minWidth:36,textAlign:'center'}}>{year}</span>
+          <button onClick={()=>setYear(y=>Math.min(y+1,currentYear))} style={{
+            background:'none',border:`0.5px solid ${C.sep}`,borderRadius:6,
+            color: year>=currentYear ? C.tertiary : C.secondary,
+            fontSize:12,cursor:year>=currentYear?'default':'pointer',padding:'1px 7px',lineHeight:'20px',
+          }}>›</button>
+        </div>
       }>
         Heatmap Annuale
       </SectionHeader>
@@ -4127,27 +4140,26 @@ const AnalyticsView = ({ C, trades }) => {
   const closed = (trades || []).filter(t => !t.open);
 
   // Heatmap annuale — GitHub-style, allineata alla settimana
-  const annualHeatmapData = (() => {
+  const [heatYear, setHeatYear] = useState(new Date().getFullYear());
+
+  const annualHeatmapData = useMemo(() => {
     const byDate = {};
     closed.forEach(t => {
       const k = (t.date||'').slice(0,10);
       if (k) byDate[k] = (byDate[k]||0) + (t.pnl||0);
     });
-    // Parte dal 1 Gennaio dell'anno corrente, fino ad oggi
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    const year = today.getFullYear();
-    // Primo lunedì prima (o uguale) al 1 Gen
-    const jan1 = new Date(year, 0, 1);
-    const dow1 = (jan1.getDay()+6)%7; // 0=Lun
+    const today = new Date(); today.setHours(0,0,0,0);
+    const jan1 = new Date(heatYear, 0, 1);
+    const dow1 = (jan1.getDay()+6)%7;
     const start = new Date(jan1);
-    start.setDate(jan1.getDate() - dow1); // allinea a lunedì precedente
+    start.setDate(jan1.getDate() - dow1);
+    const end = heatYear === today.getFullYear() ? today : new Date(heatYear, 11, 31);
 
     const cells = [];
     let week = 0;
     const cur = new Date(start);
-    while (cur <= today) {
-      const dow = (cur.getDay()+6)%7; // 0=Lun … 6=Dom
+    while (cur <= end) {
+      const dow = (cur.getDay()+6)%7;
       if (dow === 0 && cur > start) week++;
       const d = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
       cells.push({ date:d, day:dow, week, pnl:byDate[d]||0,
@@ -4155,7 +4167,7 @@ const AnalyticsView = ({ C, trades }) => {
       cur.setDate(cur.getDate()+1);
     }
     return cells;
-  })();
+  }, [closed, heatYear]);
 
   // Streak distribution dai trade reali
   const streakDistData = (() => {
@@ -4182,7 +4194,7 @@ const AnalyticsView = ({ C, trades }) => {
     <PnlDistribution C={C} data={closed}/>
     <MaeMfeScatter C={C} data={closed.filter(t=>t.mae||t.mfe)}/>
     <StreakDistribution C={C} data={streakDistData}/>
-    <AnnualHeatmap C={C} data={annualHeatmapData}/>
+    <AnnualHeatmap C={C} data={annualHeatmapData} year={heatYear} setYear={setHeatYear}/>
   </div>
   );
 };
