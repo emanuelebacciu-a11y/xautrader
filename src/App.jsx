@@ -3870,8 +3870,6 @@ const AnnualHeatmap = ({ C, data, year, setYear }) => {
     return Object.values(seen).sort((a, b) => a.week - b.week);
   })();
 
-  const year = new Date().getFullYear();
-
   const cellColor = pnl => {
     if (!pnl || pnl === 0) return C.glass2;
     const intensity = Math.min(Math.abs(pnl) / maxV, 1);
