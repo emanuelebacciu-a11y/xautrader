@@ -1695,7 +1695,7 @@ const SettingsModal = ({ C, open, onClose, settings, setSettings, accounts, acti
                       if (k.startsWith('xt_')) { localStorage.setItem(k, v); count++; }
                     });
                     haptic.success();
-                    alert(`✓ Ripristinati ${count} valori. Ricarica la pagina per applicare.`);
+                    setTimeout(() => window.location.reload(), 400);
                   } catch { haptic.error(); alert('File non valido o corrotto.'); }
                 };
                 reader.readAsText(file);
@@ -1705,16 +1705,7 @@ const SettingsModal = ({ C, open, onClose, settings, setSettings, accounts, acti
           </SettingsRow>
         </div>
 
-        <SettingsSectionTitle>Esportazione</SettingsSectionTitle>
-        <div style={{background:C.glass2,borderRadius:14,padding:'2px 14px'}}>
-          <SettingsRow C={C} label="Esporta report PDF" sub="Statistiche complete — ottimizzato per stampa">
-            <button onClick={()=>window.print()} style={{
-              padding:'6px 14px', fontSize:12, fontFamily:FONT.text, fontWeight:600,
-              color: C.primary, background: 'transparent', border:`1px solid ${C.sep2}`,
-              borderRadius:RADIUS.pill, cursor:'pointer',
-            }}>Genera</button>
-          </SettingsRow>
-        </div>
+
 
         <div style={{color:C.tertiary,fontSize:10,fontFamily:FONT.mono,marginTop:20,textAlign:'center'}}>
           Journal · v1.1
@@ -4548,10 +4539,10 @@ export default function TradingApp() {
           WebkitBackdropFilter: 'saturate(200%) blur(52px)',
           border: `0.5px solid ${C.sep2}`,
           borderRadius: 36,
-          padding: '8px',
+          padding: '8px 16px',
           display: 'flex',
           alignItems: 'center',
-          gap: 4,
+          gap: 12,
           boxShadow: scheme === 'dark'
             ? '0 14px 44px rgba(0,0,0,0.70), 0 0 0 0.5px rgba(255,255,255,0.05) inset'
             : '0 14px 44px rgba(0,0,0,0.20), 0 0 0 0.5px rgba(255,255,255,0.55) inset',
