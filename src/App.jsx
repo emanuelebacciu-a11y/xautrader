@@ -4100,24 +4100,25 @@ const AnalyticsView = ({ C, trades }) => {
       const k = (t.date||'').slice(0,10);
       if (k) byDate[k] = (byDate[k]||0) + (t.pnl||0);
     });
-    // Fine = oggi, inizio = 52 settimane fa allineato a Lunedì
+    // Parte dal 1 Gennaio dell'anno corrente, fino ad oggi
     const today = new Date();
     today.setHours(0,0,0,0);
-    // Trova il Lunedì di 52 settimane fa
-    const dow0 = (today.getDay()+6)%7; // 0=Lun
-    const end = new Date(today);
-    const start = new Date(today);
-    start.setDate(today.getDate() - 364 - dow0); // 52 settimane + offset a lunedì
+    const year = today.getFullYear();
+    // Primo lunedì prima (o uguale) al 1 Gen
+    const jan1 = new Date(year, 0, 1);
+    const dow1 = (jan1.getDay()+6)%7; // 0=Lun
+    const start = new Date(jan1);
+    start.setDate(jan1.getDate() - dow1); // allinea a lunedì precedente
 
     const cells = [];
     let week = 0;
     const cur = new Date(start);
-    while (cur <= end) {
+    while (cur <= today) {
       const dow = (cur.getDay()+6)%7; // 0=Lun … 6=Dom
       if (dow === 0 && cur > start) week++;
-      const date = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
-      cells.push({ date, day: dow, week, pnl: byDate[date]||0,
-        month: cur.getMonth(), year: cur.getFullYear(), dom: cur.getDate() });
+      const d = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
+      cells.push({ date:d, day:dow, week, pnl:byDate[d]||0,
+        month:cur.getMonth(), year:cur.getFullYear(), dom:cur.getDate() });
       cur.setDate(cur.getDate()+1);
     }
     return cells;
