@@ -4357,30 +4357,37 @@ const AnalyticsView = ({ C, trades }) => {
 };
 
 /* ============= CHART VIEW ============= */
-// Carica Lightweight Charts da CDN e dati OHLC da Yahoo Finance (proxy)
+// Carica Lightweight Charts da CDN e dati OHLC da Finnhub (CORS nativo)
 // Replica il layout TV: sfondo OLED, candele bull #00ff00 / bear #ff00ff, no griglia
 // Disegna i trade del journal sopra come marker entry/exit + linee SL/TP
 
 const CHART_TF_OPTIONS = ['3m','7m','13m','17m','33m','90m','3h','6h','1D','3D'];
 const CHART_TF_LABELS  = {'3m':'M3','7m':'M7','13m':'M13','17m':'M17','33m':'M33','90m':'M90','3h':'H3','6h':'H6','1D':'D1','3D':'3D'};
 
-// Yahoo Finance interval/range per ogni timeframe (aggrega dove necessario)
-// aggN: quante barre base unire in una → il TF risultante è interval*aggN
-// Esempi corretti: 3m = 1m*3, 7m = 1m*7, 17m = 1m*17, 90m = 30m*3
-const TF_YF = {
-  '3m':  { interval:'1m',  range:'1d',  aggN:3  },
-  '7m':  { interval:'1m',  range:'2d',  aggN:7  },
-  '13m': { interval:'1m',  range:'2d',  aggN:13 },
-  '17m': { interval:'1m',  range:'5d',  aggN:17 },
-  '33m': { interval:'1m',  range:'5d',  aggN:33 },
-  '90m': { interval:'30m', range:'1mo', aggN:3  },
-  '3h':  { interval:'60m', range:'1mo', aggN:3  },
-  '6h':  { interval:'60m', range:'3mo', aggN:6  },
-  '1D':  { interval:'1d',  range:'1y',  aggN:1  },
-  '3D':  { interval:'1d',  range:'2y',  aggN:3  },
+// ── Finnhub config ──────────────────────────────────────────────────────────
+// API gratuita, CORS nativa, nessun proxy necessario.
+// Simbolo XAUUSD su OANDA: "OANDA:XAU_USD"
+// Docs: https://finnhub.io/docs/api/forex-candles
+const FINNHUB_KEY    = 'd84ffb1r01qutij8tokgd84ffb1r01qutij8tol0';
+const FINNHUB_SYMBOL = 'OANDA:XAU_USD';
+
+// Mapping TF → resolution Finnhub + finestra temporale in secondi
+// Finnhub resolution: 1 5 15 30 60 D W M
+// Per TF non nativi aggreghiamo N barre da una resolution più fine.
+const TF_FH = {
+  '3m':  { resolution: '1',  windowDays:  2, aggN: 3  },
+  '7m':  { resolution: '1',  windowDays:  3, aggN: 7  },
+  '13m': { resolution: '1',  windowDays:  4, aggN: 13 },
+  '17m': { resolution: '1',  windowDays:  5, aggN: 17 },
+  '33m': { resolution: '1',  windowDays:  7, aggN: 33 },
+  '90m': { resolution: '30', windowDays: 30, aggN: 3  },
+  '3h':  { resolution: '60', windowDays: 30, aggN: 3  },
+  '6h':  { resolution: '60', windowDays: 60, aggN: 6  },
+  '1D':  { resolution: 'D',  windowDays:365, aggN: 1  },
+  '3D':  { resolution: 'D',  windowDays:730, aggN: 3  },
 };
 
-// Aggrega N barre consecutive in una
+// Aggrega N barre consecutive in una (per TF non nativi)
 const aggBars = (bars, n) => {
   if (n <= 1) return bars;
   const out = [];
@@ -4388,7 +4395,7 @@ const aggBars = (bars, n) => {
     const slice = bars.slice(i, i + n);
     if (!slice.length) continue;
     out.push({
-      time:  slice[0].time,                         // primo timestamp del gruppo
+      time:  slice[0].time,
       open:  slice[0].open,
       high:  Math.max(...slice.map(b => b.high)),
       low:   Math.min(...slice.map(b => b.low)),
@@ -4398,144 +4405,79 @@ const aggBars = (bars, n) => {
   return out;
 };
 
-// Fetch OHLC da Yahoo Finance con fallback su più proxy
-// setDebugInfo è opzionale: viene passato da ChartView per mostrare il pannello debug
-const fetchYahooOHLC = async (tf, setDebugInfo) => {
-  const { interval, range, aggN } = TF_YF[tf];
-  const symbol = 'XAUUSD%3DX';
-  const yfUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}&includePrePost=false`;
+// Fetch OHLC da Finnhub — CORS nativo, timestamp sempre interi in secondi
+// Per daily usa stringhe 'YYYY-MM-DD' come richiesto da LW Charts.
+const fetchFinnhubOHLC = async (tf) => {
+  const { resolution, windowDays, aggN } = TF_FH[tf];
+  const isDaily = resolution === 'D';
 
-  // Lista proxy in ordine di preferenza
-  const proxies = [
-    async () => {
-      const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(yfUrl)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    },
-    async () => {
-      const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const wrapper = await res.json();
-      // allorigins restituisce { contents: "..." } dove contents è una stringa JSON
-      if (typeof wrapper.contents === 'string') return JSON.parse(wrapper.contents);
-      return wrapper; // già oggetto
-    },
-    async () => {
-      const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(yfUrl)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    },
-  ];
+  const now  = Math.floor(Date.now() / 1000);
+  const from = now - windowDays * 86400;
 
-  // LW Charts richiede:
-  //   - intraday  → timestamp Unix in SECONDI, numero intero positivo
-  //   - daily/3D  → stringa esatta 'YYYY-MM-DD'
-  const isDaily = interval === '1d';
+  const url = `https://finnhub.io/api/v1/forex/candle?symbol=${FINNHUB_SYMBOL}&resolution=${resolution}&from=${from}&to=${now}&token=${FINNHUB_KEY}`;
 
-  /**
-   * Converte un timestamp grezzo di Yahoo → formato LW Charts.
-   * Yahoo può mandare:
-   *   • secondi interi   (es. 1716300060)
-   *   • secondi float    (es. 1716300060.0  o  1716300060.123)
-   *   • millisecondi     (es. 1716300060000)
-   *   • null / undefined
-   */
-  const toTime = (raw) => {
-    if (raw == null || !isFinite(raw)) return null;
-    // Detect millisecondi: Unix ms sono > 1e12 (anno 2001+), sec sono ~1.7e9
-    const sec = raw > 1e10 ? Math.trunc(raw / 1000) : Math.trunc(raw);
-    if (sec <= 0) return null;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Finnhub HTTP ${res.status}`);
+  const data = await res.json();
+
+  // Finnhub restituisce { s:'ok'|'no_data', t:[], o:[], h:[], l:[], c:[] }
+  if (!data || data.s === 'no_data') throw new Error('Finnhub: no_data');
+  if (data.s !== 'ok') throw new Error(`Finnhub status: ${data.s}`);
+
+  const ts = data.t;   // unix secondi, sempre interi
+  const o  = data.o;
+  const h  = data.h;
+  const l  = data.l;
+  const c  = data.c;
+
+  if (!Array.isArray(ts) || ts.length === 0) throw new Error('Finnhub: array vuoto');
+
+  // LW Charts: intraday → number (sec), daily → 'YYYY-MM-DD'
+  const toTime = (sec) => {
+    if (!sec || !isFinite(sec)) return null;
+    const s = Math.trunc(sec);
+    if (s <= 0) return null;
     if (isDaily) {
-      // LW Charts daily richiede 'YYYY-MM-DD' in UTC
-      const d = new Date(sec * 1000);
+      const d = new Date(s * 1000);
       if (isNaN(d.getTime())) return null;
-      const y  = d.getUTCFullYear();
-      const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
-      const dy = String(d.getUTCDate()).padStart(2, '0');
-      return `${y}-${mo}-${dy}`;
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
     }
-    // Intraday: LW Charts vuole number (secondi), mai float
-    return sec;
+    return s; // intero, LW Charts ok
   };
 
-  /** Valida che il time sia nel formato atteso da LW Charts */
   const isValidTime = (t) => {
     if (t == null) return false;
     if (isDaily) return typeof t === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t);
-    return typeof t === 'number' && Number.isInteger(t) && isFinite(t) && t > 0;
+    return typeof t === 'number' && Number.isInteger(t) && t > 0;
   };
 
-  let lastErr;
-  for (const tryProxy of proxies) {
-    try {
-      const data = await tryProxy();
-      const result = data?.chart?.result?.[0];
-      if (!result) throw new Error('No chart result from Yahoo');
+  const seen = new Set();
+  const bars = ts
+    .map((raw, i) => ({
+      time:  toTime(raw),
+      open:  o[i],
+      high:  h[i],
+      low:   l[i],
+      close: c[i],
+    }))
+    .filter(b => {
+      if (!isValidTime(b.time)) return false;
+      if (b.open == null || b.high == null || b.low == null || b.close == null) return false;
+      if (!isFinite(b.open) || !isFinite(b.high) || !isFinite(b.low) || !isFinite(b.close)) return false;
+      if (b.open <= 0) return false;
+      const key = String(b.time);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b_) =>
+      typeof a.time === 'string'
+        ? (a.time < b_.time ? -1 : a.time > b_.time ? 1 : 0)
+        : a.time - b_.time
+    );
 
-      const ts = result.timestamp;
-      const q  = result.indicators?.quote?.[0];
-      if (!Array.isArray(ts) || ts.length === 0) throw new Error('Empty timestamp array');
-      if (!q) throw new Error('No quote indicators');
-
-      // ── DEBUG (solo se ChartView ha passato il setter) ──
-      if (typeof setDebugInfo === 'function') {
-        const converted5  = ts.slice(0, 5).map(toTime);
-        const badTimes    = ts.map(toTime).filter(t => !isValidTime(t));
-        setDebugInfo({
-          tf, interval, range,
-          tsLen:      ts.length,
-          ts0:        ts[0],
-          ts0type:    typeof ts[0],
-          ts0isMs:    ts[0] != null && ts[0] > 1e10,
-          nullTs:     ts.filter(t => t == null).length,
-          nanTs:      ts.filter(t => typeof t === 'number' && isNaN(t)).length,
-          floatTs:    ts.filter(t => typeof t === 'number' && !Number.isInteger(t)).length,
-          dupTs:      ts.length - new Set(ts).size,
-          nullOpen:   (q.open || []).filter(v => v == null).length,
-          openLen:    (q.open || []).length,
-          converted5,
-          badTimes:   badTimes.length,
-          badExamples: badTimes.slice(0, 3),
-          granularity: result.meta?.dataGranularity,
-        });
-      }
-
-      // Costruisce barre — filtra invalidi, deduplica, ordina
-      const seen = new Set();
-      const bars = ts
-        .map((raw, i) => ({
-          time:  toTime(raw),
-          open:  q.open?.[i]  ?? null,
-          high:  q.high?.[i]  ?? null,
-          low:   q.low?.[i]   ?? null,
-          close: q.close?.[i] ?? null,
-        }))
-        .filter(b => {
-          if (!isValidTime(b.time)) return false;
-          if (b.open  == null || b.high  == null ||
-              b.low   == null || b.close == null)  return false;
-          if (!isFinite(b.open)  || !isFinite(b.high) ||
-              !isFinite(b.low)   || !isFinite(b.close)) return false;
-          if (b.open <= 0) return false;
-          // Deduplica per time
-          const key = String(b.time);
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        })
-        .sort((a, b_) => {
-          // Ordine strettamente crescente (richiesto da LW Charts)
-          if (typeof a.time === 'string') return a.time < b_.time ? -1 : a.time > b_.time ? 1 : 0;
-          return a.time - b_.time;
-        });
-
-      if (bars.length === 0) throw new Error('Nessuna barra valida dopo filtraggio');
-      return aggBars(bars, aggN);
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error('Tutti i proxy falliti');
+  if (bars.length === 0) throw new Error('Nessuna barra valida');
+  return aggBars(bars, aggN);
 };
 
 // Converte prezzo → pixel Y dentro il chart (area canvas)
@@ -4561,7 +4503,6 @@ const ChartView = ({ C, trades }) => {
   const [error, setError]         = useState(null);
   const [lastPrice, setLastPrice] = useState(null);
   const [lwReady, setLwReady]     = useState(false);
-  const [debugInfo, setDebugInfo] = useState(null);
 
   // Carica Lightweight Charts da CDN una volta sola
   useEffect(() => {
@@ -4826,7 +4767,7 @@ const ChartView = ({ C, trades }) => {
       if (!series) return;
       barsRef.current = [];
 
-      const bars = await fetchYahooOHLC(targetTf, setDebugInfo);
+      const bars = await fetchFinnhubOHLC(targetTf);
       // Controlla che il TF non sia cambiato durante il fetch (race condition)
       if (tfRef.current !== targetTf) return;
       if (!seriesRef.current) return;
@@ -4898,23 +4839,10 @@ const ChartView = ({ C, trades }) => {
           </div>
         )}
         {error && !loading && (
-          <div style={{ position:'absolute', inset:0, zIndex:10, overflowY:'auto', background:'#000', padding:16 }}>
-            <div style={{ color:'#ff3333', fontSize:13, fontFamily:FONT.mono, marginBottom:12 }}>{error}</div>
-            {debugInfo && (
-              <div style={{ fontFamily:FONT.mono, fontSize:11, color:'#aaa', lineHeight:1.7 }}>
-                <div style={{ color:'#7DF9FF', marginBottom:6 }}>── YF DEBUG ──</div>
-                <div>tf: <span style={{color:'#fff'}}>{debugInfo.tf}</span> | interval: <span style={{color:'#fff'}}>{debugInfo.interval}</span> | range: <span style={{color:'#fff'}}>{debugInfo.range}</span></div>
-                <div>granularity: <span style={{color:'#fff'}}>{debugInfo.granularity}</span></div>
-                <div>ts length: <span style={{color:'#fff'}}>{debugInfo.tsLen}</span></div>
-                <div>ts[0]: <span style={{color:'#fff'}}>{String(debugInfo.ts0)}</span> | type: <span style={{color:'#fff'}}>{debugInfo.ts0type}</span> | ms?: <span style={{color:debugInfo.ts0isMs?'#ff3333':'#39FF14'}}>{String(debugInfo.ts0isMs)}</span></div>
-                <div>null ts: <span style={{color:debugInfo.nullTs>0?'#ff3333':'#39FF14'}}>{debugInfo.nullTs}</span> | NaN ts: <span style={{color:debugInfo.nanTs>0?'#ff3333':'#39FF14'}}>{debugInfo.nanTs}</span> | float ts: <span style={{color:debugInfo.floatTs>0?'#FFB627':'#39FF14'}}>{debugInfo.floatTs}</span> | dup ts: <span style={{color:debugInfo.dupTs>0?'#ff3333':'#39FF14'}}>{debugInfo.dupTs}</span></div>
-                <div>null opens: <span style={{color:debugInfo.nullOpen>0?'#FFB627':'#39FF14'}}>{debugInfo.nullOpen}</span> / {debugInfo.openLen}</div>
-                <div>toTime() first 5: <span style={{color:'#fff'}}>{JSON.stringify(debugInfo.converted5)}</span></div>
-                <div>BAD time values: <span style={{color:debugInfo.badTimes>0?'#ff3333':'#39FF14'}}>{debugInfo.badTimes}</span>{debugInfo.badTimes>0 && <span style={{color:'#ff3333'}}> → {JSON.stringify(debugInfo.badExamples)}</span>}</div>
-              </div>
-            )}
+          <div style={{ position:'absolute', inset:0, zIndex:10, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#000', padding:24 }}>
+            <div style={{ color:'#ff3333', fontSize:13, fontFamily:FONT.mono, marginBottom:16, textAlign:'center' }}>{error}</div>
             <button onClick={()=>{ setLoading(true); loadData(tf); }} style={{
-              marginTop:16, padding:'8px 18px', borderRadius:20,
+              padding:'8px 18px', borderRadius:20,
               background:'rgba(255,255,255,0.08)', border:'0.5px solid #636363',
               color:'#fff', fontSize:12, fontFamily:FONT.mono, cursor:'pointer',
             }}>Riprova</button>
