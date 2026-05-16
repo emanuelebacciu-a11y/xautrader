@@ -4448,7 +4448,7 @@ export default function TradingApp() {
         backdropFilter: 'saturate(200%) blur(32px)',
         WebkitBackdropFilter: 'saturate(200%) blur(32px)',
         borderBottom: `0.5px solid ${C.sep}`,
-        marginTop: '-8px',
+        marginTop: '-20px',
         paddingTop: 'env(safe-area-inset-top, 0px)',
       }}>
         <div className="absolute inset-0 xt-shimmer-overlay" style={{opacity: scheme==='dark'?1:0.4}}/>
@@ -4539,7 +4539,7 @@ export default function TradingApp() {
       {/* BOTTOM TAB BAR */}
       <div className="fixed left-1/2 z-50" style={{
         transform: 'translateX(-50%)',
-        bottom: 'max(env(safe-area-inset-bottom, 0px), -8px)',
+        bottom: 'max(env(safe-area-inset-bottom, 0px), -20px)',
       }}>
         <div style={{
           background: C.glassBar,
