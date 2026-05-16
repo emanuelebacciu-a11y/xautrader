@@ -22,15 +22,3 @@ html, body {
   height: 100%;
   overflow: hidden;
 }
-
-/* Il wrapper principale usa --vh (= window.innerHeight / 100)
-   che su iOS è l'altezza REALE inclusa la zona sotto la barra Safari */
-.xt-app-root {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  /* Invece di bottom:0, usiamo height con --vh reale */
-  height: calc(var(--vh, 1vh) * 100) !important;
-  bottom: auto !important;
-}
