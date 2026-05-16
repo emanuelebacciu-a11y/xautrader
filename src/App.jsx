@@ -4464,11 +4464,19 @@ const fetchYahooOHLC = async (tf) => {
           low:   q.low[i],
           close: q.close[i],
         }))
-        .filter(b =>
-          b.open != null && b.high != null && b.low != null && b.close != null &&
-          isFinite(b.open) && isFinite(b.high) && isFinite(b.low) && isFinite(b.close) &&
-          b.open > 0 && !seen.has(b.time) && seen.add(b.time)
-        )
+        .filter(b => {
+          // Valida time: toTime(null/undefined) produce 'NaN-NaN-NaN' o NaN → LW Charts crasha
+          const timeOk = isDaily
+            ? (typeof b.time === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.time))
+            : (typeof b.time === 'number' && isFinite(b.time) && b.time > 0);
+          if (!timeOk) return false;
+          if (b.open == null || b.high == null || b.low == null || b.close == null) return false;
+          if (!isFinite(b.open) || !isFinite(b.high) || !isFinite(b.low) || !isFinite(b.close)) return false;
+          if (b.open <= 0) return false;
+          if (seen.has(b.time)) return false;
+          seen.add(b.time);
+          return true;
+        })
         .sort((a, b_) => {
           if (typeof a.time === 'string') return a.time < b_.time ? -1 : a.time > b_.time ? 1 : 0;
           return a.time - b_.time;
