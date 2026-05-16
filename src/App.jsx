@@ -635,6 +635,77 @@ const _d = v => {
   return s.slice(0, 10);
 };
 
+// Calcola tipo trade dalla durata in minuti
+// < 60min → Scalp | < 360min → Intraday | < 7200min (5gg) → Swing | >= 7200min → Position
+const calcTradeType = (explicit, durationMin) => {
+  if (explicit && explicit !== 'Non spec.') return explicit;
+  const d = Number(durationMin);
+  if (!d || d <= 0) return 'Non spec.';
+  if (d < 60)   return 'Scalp';
+  if (d < 360)  return 'Intraday';
+  if (d < 7200) return 'Swing';
+  return 'Position';
+};
+
+// Calcola sessione dall'orario locale Amsterdam (CET=UTC+1, CEST=UTC+2)
+// Le sessioni forex sono in ora locale Amsterdam:
+//   Asia      : 01:00 – 09:00
+//   Frankfurt : 09:00 – 10:00
+//   London    : 09:00 – 18:00  (apre insieme a Frankfurt)
+//   New York  : 14:00 – 23:00
+// Priorità in caso di overlap: NEWYORK > LONDON > FRANKFURT > ASIA
+const calcSession = (timeStr, dateStr) => {
+  if (!timeStr) return 'NEWYORK';
+  // Determina offset Amsterdam: CEST (UTC+2) da ultima domenica marzo a ultima domenica ottobre
+  let offset = 1; // CET default
+  if (dateStr) {
+    const d = new Date(dateStr);
+    const yr = d.getFullYear();
+    // Ultima domenica di marzo
+    const lastSunMar = new Date(yr, 2, 31);
+    lastSunMar.setDate(31 - lastSunMar.getDay());
+    // Ultima domenica di ottobre
+    const lastSunOct = new Date(yr, 9, 31);
+    lastSunOct.setDate(31 - lastSunOct.getDay());
+    if (d >= lastSunMar && d < lastSunOct) offset = 2; // CEST
+  }
+  const [h, m] = String(timeStr).split(':').map(Number);
+  const utcMins = h * 60 + (m || 0);
+  const locMins = utcMins + offset * 60; // ora locale Amsterdam
+  const lh = Math.floor(locMins / 60) % 24;
+  const lm = locMins % 60;
+  const local = lh * 60 + lm;
+  if (local >= 14 * 60 && local < 23 * 60) return 'NEWYORK';
+  if (local >=  9 * 60 && local < 18 * 60) return 'LONDON';
+  if (local >=  9 * 60 && local < 10 * 60) return 'FRANKFURT';
+  return 'ASIA';
+};
+
+// Calcola closed_to da prezzi
+// TP  → exit entro 2$ dal tp
+// BE  → sl preso, exit tra entry e entry+2$ (0-2$ in profit sul prezzo)
+// SP  → sl preso, exit oltre entry+2$ (stop in profit oltre 2$)
+// SL  → sl preso in perdita
+// MAN → chiusura manuale (exit non coincide con sl né tp)
+const calcClosedTo = (explicit, dir, entry, exit, sl, tp) => {
+  if (explicit && !['', 'MAN', 'MANUAL'].includes(explicit.toUpperCase())) return explicit.toUpperCase();
+  if (!exit || !entry) return explicit || 'MAN';
+  const isLong  = String(dir).toUpperCase().includes('L') || String(dir).toUpperCase() === 'BUY';
+  const TOL_TP  = 2.0; // tolleranza TP in punti prezzo
+  const BE_MAX  = 2.0; // soglia BE/SP in punti prezzo
+  // Controlla TP
+  if (tp && Math.abs(exit - tp) <= TOL_TP) return 'TP';
+  // Controlla se exit è vicino allo SL (entro 2$)
+  if (sl && Math.abs(exit - sl) <= TOL_TP) {
+    // Quanto è in profitto lo SL rispetto all'entry?
+    const slProfitPts = isLong ? (sl - entry) : (entry - sl);
+    if (slProfitPts >= BE_MAX) return 'SP';  // SL oltre 2$ in profit → Stop in Profit
+    if (slProfitPts >= 0)      return 'BE';  // SL tra entry e +2$ → Break Even
+    return 'SL';                              // SL in perdita
+  }
+  return 'MAN';
+};
+
 // Mappa riga Supabase → oggetto trade compatibile con l'app
 const mapRow = (e, idx) => {
   const dateEntry = _d(e.date_entry);
@@ -652,6 +723,57 @@ const mapRow = (e, idx) => {
     closedTo: String(e.partial_closed_to || '').toUpperCase(),
   } : null;
 
+  const dir        = String(e.direction || 'LONG').toUpperCase().trim();
+  const entry      = _n(e.entry_p);
+  const exitP      = isOpen ? null : _n(e.exit_p) || null;
+  const sl         = _n(e.sl_price);
+  const tp         = _n(e.tp_price);
+  const size       = _n(e.size) || 0.01;
+  const commission = _n(e.commission);
+  const swap       = _n(e.swap);
+  const spread     = _n(e.spread);
+  const timeEntry  = String(e.time_entry || '').slice(0, 5);
+  const timeExit   = isOpen ? null : String(e.time_exit || '').slice(0, 5);
+
+  // Duration: usa DB se c'è, altrimenti calcola da date/time
+  let duration = _n(e.duration);
+  if (!duration && dateEntry && !isOpen && dateExit && timeEntry && timeExit) {
+    const tIn  = new Date(`${dateEntry}T${timeEntry}`);
+    const tOut = new Date(`${dateExit}T${timeExit}`);
+    duration = Math.round((tOut - tIn) / 60000);
+  }
+
+  // PnL: usa DB se c'è, altrimenti calcola (XAUUSD: 1 lot = 100 oz, pip value = 1$ per 0.01 lot)
+  let pnl = _n(e.pnl);
+  if (!pnl && entry && exitP && size) {
+    const isLong = dir.includes('L') || dir === 'BUY';
+    const pts    = isLong ? (exitP - entry) : (entry - exitP);
+    pnl = Math.round(pts * size * 100 * 100) / 100;
+  }
+
+  // PnL netto: usa DB se c'è, altrimenti pnl - commission - swap - spread
+  let pnlNetto = _n(e.pnl_netto);
+  if (!pnlNetto && pnl !== 0) {
+    pnlNetto = Math.round((pnl - (commission || 0) - (swap || 0) - (spread || 0)) * 100) / 100;
+  }
+
+  // RR: usa DB se c'è, altrimenti calcola
+  let rr = isOpen ? null : _n(e.rr) || null;
+  if (!rr && !isOpen && entry && exitP && sl) {
+    const isLong = dir.includes('L') || dir === 'BUY';
+    const risk   = isLong ? (entry - sl) : (sl - entry);
+    const reward = isLong ? (exitP - entry) : (entry - exitP);
+    if (risk > 0) rr = Math.round(reward / risk * 100) / 100;
+  }
+
+  // Session: usa DB se c'è, altrimenti calcola da ora entrata (Amsterdam)
+  const session = (e.session && e.session.trim())
+    ? String(e.session).toUpperCase().trim()
+    : calcSession(timeEntry, dateEntry);
+
+  // Closed_to: usa DB se c'è, altrimenti deriva da prezzi
+  const closedTo = isOpen ? null : calcClosedTo(closed, dir, entry, exitP, sl, tp);
+
   return {
     id:           e.id || idx + 1,
     supabaseId:   e.id,
@@ -660,26 +782,26 @@ const mapRow = (e, idx) => {
     mt5Ticket:    e.mt5_ticket || null,
     date:         dateEntry,
     dateExit:     isOpen ? null : dateExit,
-    timeEntry:    String(e.time_entry || '').slice(0, 5),
-    timeExit:     isOpen ? null : String(e.time_exit || '').slice(0, 5),
-    duration:     _n(e.duration),
-    dir:          String(e.direction || 'LONG').toUpperCase().trim(),
-    session:      String(e.session || 'NEWYORK').toUpperCase().trim(),
-    entry:        _n(e.entry_p),
-    exit:         isOpen ? null : _n(e.exit_p) || null,
-    sl:           _n(e.sl_price),
-    tp:           _n(e.tp_price),
+    timeEntry,
+    timeExit,
+    duration,
+    dir,
+    session,
+    entry,
+    exit:         exitP,
+    sl,
+    tp,
     currentPrice: isOpen ? _n(e.exit_p) || null : null,
-    size:         _n(e.size) || 0.01,
-    spread:       _n(e.spread),
-    commission:   _n(e.commission),
-    swap:         _n(e.swap),
+    size,
+    spread,
+    commission,
+    swap,
     slippage:     0,
-    pnl:          _n(e.pnl),
-    pnlNetto:     _n(e.pnl_netto),
-    rr:           isOpen ? null : _n(e.rr) || null,
-    tradeType:    String(e.trade_type || ''),
-    closed:       isOpen ? null : closed || null,
+    pnl,
+    pnlNetto,
+    rr,
+    tradeType:    calcTradeType(String(e.tradetype || e.trade_type || '').trim(), duration),
+    closed:       closedTo,
     equity:       _n(e.equity),
     mae:          _n(e.mae),
     mfe:          _n(e.mfe),
@@ -724,7 +846,7 @@ const groupTrades = rows => {
 // Costruisce equity curve dai trade chiusi
 const buildEquityCurve = (trades, balanceInit = 10000) => {
   const byDate = {};
-  trades.filter(t => !t.open).forEach(t => { byDate[t.date] = (byDate[t.date] || 0) + t.pnl; });
+  trades.filter(t => !t.open).forEach(t => { byDate[t.dateExit] = (byDate[t.dateExit] || 0) + t.pnl; });
   const dates = Object.keys(byDate).sort();
   const curve = [{ day: 'Dep.', value: balanceInit, dateKey: null }];
   let eq = balanceInit;
@@ -819,9 +941,9 @@ const computeAllStats = (trades) => {
   const lgLos  = losses.length ? losses.reduce((a,b)=>a.pnl<b.pnl?a:b).pnl : 0;
 
   // Equity curve
-  const BALANCE_INIT = 10000;
+  const BALANCE_INIT = (()=>{const f=closed.find(t=>t.equity!=null);return f?Math.round((f.equity-(f.pnl||0))*100)/100:10000;})();
   const byDate = {};
-  closed.forEach(t => { byDate[t.date] = (byDate[t.date]||0) + t.pnl; });
+  closed.forEach(t => { byDate[t.dateExit] = (byDate[t.dateExit]||0) + t.pnl; });
   const dates = Object.keys(byDate).sort();
   let eq = BALANCE_INIT, hwm = BALANCE_INIT, maxDD = 0;
   dates.forEach(d => {
@@ -931,14 +1053,14 @@ const computeAllStats = (trades) => {
 
   const MONTH_NAMES = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
   const breakMonth = MONTH_NAMES.map((name,i) => {
-    const t = closed.filter(tr=>new Date(tr.date).getMonth()===i);
+    const t = closed.filter(tr=>new Date(tr.dateExit || tr.date).getMonth()===i);
     const w = t.filter(tr=>tr.pnl>0).length;
     const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
     return { name, trades:t.length, wr:t.length?Math.round(w/t.length*100):0, pnl:p, avg:t.length?p/t.length:0 };
   }).filter(m=>m.trades>0);
 
-  const breakType = ['Scalp','Intraday','Swing','Position'].map(name => {
-    const t = closed.filter(tr=>(tr.tradeType||'').toLowerCase()===name.toLowerCase());
+  const breakType = [...new Set(['Scalp','Intraday','Swing','Position',...closed.map(tr=>(tr.tradeType||'').trim()).map(s=>s||'Non spec.').filter(s=>s)])].map(name => {
+        const t = closed.filter(tr=>((tr.tradeType||'').trim()||'Non spec.').toLowerCase()===name.toLowerCase());
     const w = t.filter(tr=>tr.pnl>0).length;
     const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
     return { name, trades:t.length, wr:t.length?Math.round(w/t.length*100):0, pnl:p, avg:t.length?p/t.length:0 };
@@ -1485,26 +1607,38 @@ const SettingsModal = ({ C, open, onClose, settings, setSettings, accounts, acti
         {/* Aspetto */}
         <SettingsSectionTitle>Aspetto</SettingsSectionTitle>
         <div style={{background:C.glass2,borderRadius:14,padding:'2px 14px'}}>
-          <SettingsRow C={C} label="Tema scuro" sub={schemeOverride==='auto' ? `Auto · ${scheme==='dark'?'attualmente scuro':'attualmente chiaro'}` : (schemeOverride==='dark'?'Sempre scuro':'Sempre chiaro')}>
+          <SettingsRow C={C} label="Tema" sub={schemeOverride==='auto' ? `Auto · ${scheme==='dark'?'attualmente scuro':'attualmente chiaro'}` : (schemeOverride==='dark'?'Sempre scuro':'Sempre chiaro')}>
             <SegmentedControl C={C} options={['Auto','Scuro','Chiaro']}
               value={schemeOverride==='auto'?'Auto':schemeOverride==='dark'?'Scuro':'Chiaro'}
               onChange={(v)=>setSchemeOverride(v==='Auto'?'auto':v==='Scuro'?'dark':'light')}/>
           </SettingsRow>
         </div>
 
-        {/* Account */}
+        {/* Account — derivati dai trade reali su Supabase */}
         <SettingsSectionTitle>Account</SettingsSectionTitle>
         <div style={{background:C.glass2,borderRadius:14,padding:'2px 14px'}}>
-          {accounts.map((a,i)=>(
-            <SettingsRow C={C} key={a.id} label={a.name} sub={`${a.broker} · Balance iniziale $${a.balanceInit.toLocaleString()}`}>
-              <button onClick={()=>setActiveAccount(a.id)} style={{
-                padding:'5px 12px', fontSize:11, fontFamily:FONT.text, fontWeight:600,
-                color: activeAccount===a.id ? C.bg : C.cyan,
-                background: activeAccount===a.id ? C.cyan : 'transparent',
-                border:`1px solid ${C.cyan}`, borderRadius:RADIUS.pill, cursor:'pointer',
-              }}>{activeAccount===a.id ? 'Attivo' : 'Attiva'}</button>
-            </SettingsRow>
-          ))}
+          {(() => {
+            try {
+              const cache = JSON.parse(localStorage.getItem('xt_sb_cache') || 'null');
+              const ids = [...new Set((cache?.trades || []).map(t => t.accountId).filter(Boolean))];
+              if (ids.length === 0) return (
+                <SettingsRow C={C} label="Nessun account trovato" sub="I conti appariranno automaticamente dai trade su Supabase"/>
+              );
+              const labelFor = id => id === 'main' ? 'Account principale' : id === 'demo' ? 'Account demo' : id;
+              return ids.map(id => (
+                <SettingsRow C={C} key={id} label={labelFor(id)} sub={`ID: ${id}`}>
+                  <button onClick={()=>setActiveAccount(id)} style={{
+                    padding:'5px 12px', fontSize:11, fontFamily:FONT.text, fontWeight:600,
+                    color: activeAccount===id ? C.bg : C.cyan,
+                    background: activeAccount===id ? C.cyan : 'transparent',
+                    border:`1px solid ${C.cyan}`, borderRadius:RADIUS.pill, cursor:'pointer',
+                  }}>{activeAccount===id ? 'Attivo' : 'Attiva'}</button>
+                </SettingsRow>
+              ));
+            } catch {
+              return <SettingsRow C={C} label="Nessun account trovato" sub="I conti appariranno automaticamente dai trade su Supabase"/>;
+            }
+          })()}
         </div>
 
         {/* Protezioni */}
@@ -3870,11 +4004,11 @@ const AnnualHeatmap = ({ C, data, year, setYear }) => {
     return Object.values(seen).sort((a, b) => a.week - b.week);
   })();
 
+  
   const cellColor = pnl => {
     if (!pnl || pnl === 0) return C.glass2;
-    const intensity = Math.min(Math.abs(pnl) / maxV, 1);
-    const alpha = Math.round(40 + intensity * 200).toString(16).padStart(2, '0');
-    return pnl > 0 ? `${C.green}${alpha}` : `${C.red}${alpha}`;
+          const alpha = +(Math.min(Math.abs(pnl) / maxV, 1) * 0.8).toFixed(2);
+      return pnl > 0 ? `rgba(34,197,94,${alpha})` : `rgba(239,68,68,${alpha})`;
   };
 
   return (
@@ -4270,8 +4404,9 @@ export default function TradingApp() {
     <div className="relative" style={{
       background: C.bg, color: C.primary, fontFamily: FONT.text,
       WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale',
-      overflowX: 'hidden', overflowY: 'hidden',
-      height: '100dvh', maxHeight: '100dvh',
+      
+      position: 'fixed', inset: 0,
+      
       display: 'flex', flexDirection: 'column',
     }}>
       <div className="fixed inset-0 pointer-events-none" style={{ background: C.ambient }}/>
@@ -4290,39 +4425,30 @@ export default function TradingApp() {
         backdropFilter: 'saturate(200%) blur(32px)',
         WebkitBackdropFilter: 'saturate(200%) blur(32px)',
         borderBottom: `0.5px solid ${C.sep}`,
-        paddingTop: 'calc(env(safe-area-inset-top, 0px) - 14px)',
+        paddingTop: 'env(safe-area-inset-top, 0px)',
       }}>
         <div className="absolute inset-0 xt-shimmer-overlay" style={{opacity: scheme==='dark'?1:0.4}}/>
-        <div className="max-w-7xl mx-auto px-5 py-3 flex items-center justify-between relative">
-          <div className="flex items-center gap-3">
-            <div className="xt-btn">
-              <AppIcon gradient={`linear-gradient(135deg, ${C.green}, ${C.cyan})`} active size={28}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                  <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" fill={C.iconBg}/>
-                </svg>
-              </AppIcon>
-            </div>
-            <div>
-              <div style={{fontFamily:FONT.display,fontSize:14,fontWeight:600,letterSpacing:'-0.3px',color:C.primary, ...neonText(C.cyan, C.scheme)}}> Journal</div>
-              <div style={{color:C.tertiary,fontSize:10,fontFamily:FONT.mono,marginTop:-1,fontVariantNumeric:'tabular-nums'}}>{timeStr} · {accounts.find(a=>a.id===activeAccount)?.broker || 'VT MARKETS'}</div>
-            </div>
+        <div className="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between relative">
+          {/* Sinistra: nome conto attivo */}
+          <div style={{
+            fontFamily: FONT.text, fontSize: 13, fontWeight: 600,
+            color: C.primary, letterSpacing: '-0.2px',
+          }}>
+            {accounts.find(a => a.id === activeAccount)?.name || activeAccount}
           </div>
+          {/* Destra: streak + live + settings */}
           <div className="flex items-center gap-1.5">
-            {/* Cooldown banner */}
             {cooldownOn && (
               <div className="flex items-center gap-1 px-2 py-1" style={{
-                background:`${C.red}18`, border:`0.5px solid ${C.red}50`,
-                borderRadius:RADIUS.pill,
+                background:`${C.red}18`, border:`0.5px solid ${C.red}50`, borderRadius:RADIUS.pill,
               }}>
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke={C.red} strokeWidth="2"/><path d="M12 7v5l3 3" stroke={C.red} strokeWidth="2" strokeLinecap="round"/></svg>
                 <span style={{color:C.red,fontSize:10,fontFamily:FONT.mono,fontWeight:600}}>Pausa</span>
               </div>
             )}
-            {/* Daily lock banner */}
             {dailyLock.reached && (
               <div className="flex items-center gap-1 px-2 py-1" style={{
-                background:`${C.green}18`, border:`0.5px solid ${C.green}50`,
-                borderRadius:RADIUS.pill,
+                background:`${C.green}18`, border:`0.5px solid ${C.green}50`, borderRadius:RADIUS.pill,
               }}>
                 <Check size={9} strokeWidth={3} style={{color:C.green}}/>
                 <span style={{color:C.green,fontSize:10,fontFamily:FONT.mono,fontWeight:600}}>Target</span>
@@ -4361,18 +4487,7 @@ export default function TradingApp() {
                 </button>
               )}
             </div>
-            {/* Dark mode toggle pill */}
-            <button onClick={()=>setSchemeOverride(scheme==='dark'?'light':'dark')} className="xt-btn" style={{
-              width:30, height:30, borderRadius:15,
-              background: C.glass2, border:`0.5px solid ${C.sep}`,
-              cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
-            }}>
-              {scheme === 'dark'
-                ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="5" fill={C.yellow}/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke={C.yellow} strokeWidth="2" strokeLinecap="round"/></svg>
-                : <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" fill={C.secondary}/></svg>
-              }
-            </button>
-            {/* Gear / Settings */}
+            {/* Settings */}
             <button onClick={()=>setSettingsOpen(true)} className="xt-btn" style={{
               width:30, height:30, borderRadius:15,
               background: C.glass2, border:`0.5px solid ${C.sep}`,
@@ -4390,24 +4505,17 @@ export default function TradingApp() {
       {/* PAGER — scrollabile solo nel content, non nella pagina */}
       <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none' }}>
         <div className="max-w-7xl mx-auto px-5 py-4"
-          style={{ paddingBottom:'calc(env(safe-area-inset-bottom, 0px) + 80px)' }}>
+          style={{ paddingBottom: 0 }}>
           {TAB_ORDER[tabIdx] === 'daily'    && <ErrorBoundary C={C}><DailyView    C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
           {TAB_ORDER[tabIdx] === 'temporal' && <ErrorBoundary C={C}><TemporalView C={C} trades={trades} equity={equity}/></ErrorBoundary>}
           {TAB_ORDER[tabIdx] === 'stats'    && <ErrorBoundary C={C}><StatsView    C={C} trades={trades}/></ErrorBoundary>}
         </div>
       </div>
 
-      {/* BOTTOM SAFE AREA — copre la barra home indicator iOS */}
-      <div style={{
-        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 49,
-        height: 'env(safe-area-inset-bottom, 0px)',
-        background: C.bg,
-      }}/>
-
       {/* BOTTOM TAB BAR */}
       <div className="fixed left-1/2 z-50" style={{
         transform: 'translateX(-50%)',
-        bottom: 'calc(env(safe-area-inset-bottom, 0px) + 6px)',
+        bottom: 'max(env(safe-area-inset-bottom, 20px), 16px)',
       }}>
         <div style={{
           background: C.glassBar,
