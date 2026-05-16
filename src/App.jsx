@@ -4384,15 +4384,11 @@ const TF_YF = {
 const aggBars = (bars, n) => {
   if (n <= 1) return bars;
   const out = [];
-  const seen = new Set();
   for (let i = 0; i < bars.length; i += n) {
     const slice = bars.slice(i, i + n);
     if (!slice.length) continue;
-    const t = slice[0].time;
-    if (seen.has(t)) continue;
-    seen.add(t);
     out.push({
-      time:  t,
+      time:  slice[0].time,                         // primo timestamp del gruppo
       open:  slice[0].open,
       high:  Math.max(...slice.map(b => b.high)),
       low:   Math.min(...slice.map(b => b.low)),
@@ -4403,7 +4399,8 @@ const aggBars = (bars, n) => {
 };
 
 // Fetch OHLC da Yahoo Finance con fallback su più proxy
-const fetchYahooOHLC = async (tf) => {
+// setDebugInfo è opzionale: viene passato da ChartView per mostrare il pannello debug
+const fetchYahooOHLC = async (tf, setDebugInfo) => {
   const { interval, range, aggN } = TF_YF[tf];
   const symbol = 'XAUUSD%3DX';
   const yfUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}&includePrePost=false`;
@@ -4418,8 +4415,10 @@ const fetchYahooOHLC = async (tf) => {
     async () => {
       const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      return JSON.parse(json.contents);
+      const wrapper = await res.json();
+      // allorigins restituisce { contents: "..." } dove contents è una stringa JSON
+      if (typeof wrapper.contents === 'string') return JSON.parse(wrapper.contents);
+      return wrapper; // già oggetto
     },
     async () => {
       const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(yfUrl)}`);
@@ -4429,21 +4428,41 @@ const fetchYahooOHLC = async (tf) => {
   ];
 
   // LW Charts richiede:
-  //   - intraday  → timestamp Unix in SECONDI (intero)
-  //   - daily/3D  → stringa 'YYYY-MM-DD'
+  //   - intraday  → timestamp Unix in SECONDI, numero intero positivo
+  //   - daily/3D  → stringa esatta 'YYYY-MM-DD'
   const isDaily = interval === '1d';
-  const toTime  = (unixSec) => {
+
+  /**
+   * Converte un timestamp grezzo di Yahoo → formato LW Charts.
+   * Yahoo può mandare:
+   *   • secondi interi   (es. 1716300060)
+   *   • secondi float    (es. 1716300060.0  o  1716300060.123)
+   *   • millisecondi     (es. 1716300060000)
+   *   • null / undefined
+   */
+  const toTime = (raw) => {
+    if (raw == null || !isFinite(raw)) return null;
+    // Detect millisecondi: Unix ms sono > 1e12 (anno 2001+), sec sono ~1.7e9
+    const sec = raw > 1e10 ? Math.trunc(raw / 1000) : Math.trunc(raw);
+    if (sec <= 0) return null;
     if (isDaily) {
-      // Converte Unix sec → 'YYYY-MM-DD' in UTC
-      const d = new Date(unixSec * 1000);
-      const y = d.getUTCFullYear();
-      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-      const day = String(d.getUTCDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
+      // LW Charts daily richiede 'YYYY-MM-DD' in UTC
+      const d = new Date(sec * 1000);
+      if (isNaN(d.getTime())) return null;
+      const y  = d.getUTCFullYear();
+      const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const dy = String(d.getUTCDate()).padStart(2, '0');
+      return `${y}-${mo}-${dy}`;
     }
-    // Intraday: intero (Yahoo a volte manda float o ms)
-    const sec = unixSec > 1e10 ? Math.floor(unixSec / 1000) : Math.floor(unixSec);
+    // Intraday: LW Charts vuole number (secondi), mai float
     return sec;
+  };
+
+  /** Valida che il time sia nel formato atteso da LW Charts */
+  const isValidTime = (t) => {
+    if (t == null) return false;
+    if (isDaily) return typeof t === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t);
+    return typeof t === 'number' && Number.isInteger(t) && isFinite(t) && t > 0;
   };
 
   let lastErr;
@@ -4451,72 +4470,66 @@ const fetchYahooOHLC = async (tf) => {
     try {
       const data = await tryProxy();
       const result = data?.chart?.result?.[0];
-      if (!result) throw new Error('No data');
+      if (!result) throw new Error('No chart result from Yahoo');
+
       const ts = result.timestamp;
-      const q  = result.indicators.quote[0];
+      const q  = result.indicators?.quote?.[0];
+      if (!Array.isArray(ts) || ts.length === 0) throw new Error('Empty timestamp array');
+      if (!q) throw new Error('No quote indicators');
 
-      // ── DEBUG UI ──
-      const _isDaily = interval === '1d';
-      const _toTime = (unixSec) => {
-        if (_isDaily) {
-          const d = new Date(unixSec * 1000);
-          return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
-        }
-        return unixSec > 1e10 ? Math.floor(unixSec/1000) : Math.floor(unixSec);
-      };
-      const _nullTs  = (ts||[]).filter(t => t == null).length;
-      const _nanTs   = (ts||[]).filter(t => typeof t === 'number' && isNaN(t)).length;
-      const _floatTs = (ts||[]).filter(t => typeof t === 'number' && !Number.isInteger(t)).length;
-      const _dupTs   = (ts||[]).length - new Set(ts||[]).size;
-      const _nullOpen = (q.open||[]).filter(v => v == null).length;
-      const _converted5 = (ts||[]).slice(0,5).map(t => _toTime(t));
-      const _badTimes = (ts||[]).map(t => _toTime(t)).filter(t =>
-        _isDaily
-          ? !(typeof t === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t))
-          : !(typeof t === 'number' && isFinite(t) && t > 0)
-      );
-      setDebugInfo({
-        tf, interval, range,
-        tsLen: (ts||[]).length,
-        ts0: ts?.[0], ts0type: typeof ts?.[0], ts0isMs: ts?.[0] > 1e10,
-        nullTs: _nullTs, nanTs: _nanTs, floatTs: _floatTs, dupTs: _dupTs,
-        nullOpen: _nullOpen, openLen: (q.open||[]).length,
-        converted5: _converted5,
-        badTimes: _badTimes.length,
-        badExamples: _badTimes.slice(0,3),
-        granularity: result.meta?.dataGranularity,
-        proxyName: tryProxy.name || '?',
-      });
-      // ── END DEBUG UI ──
+      // ── DEBUG (solo se ChartView ha passato il setter) ──
+      if (typeof setDebugInfo === 'function') {
+        const converted5  = ts.slice(0, 5).map(toTime);
+        const badTimes    = ts.map(toTime).filter(t => !isValidTime(t));
+        setDebugInfo({
+          tf, interval, range,
+          tsLen:      ts.length,
+          ts0:        ts[0],
+          ts0type:    typeof ts[0],
+          ts0isMs:    ts[0] != null && ts[0] > 1e10,
+          nullTs:     ts.filter(t => t == null).length,
+          nanTs:      ts.filter(t => typeof t === 'number' && isNaN(t)).length,
+          floatTs:    ts.filter(t => typeof t === 'number' && !Number.isInteger(t)).length,
+          dupTs:      ts.length - new Set(ts).size,
+          nullOpen:   (q.open || []).filter(v => v == null).length,
+          openLen:    (q.open || []).length,
+          converted5,
+          badTimes:   badTimes.length,
+          badExamples: badTimes.slice(0, 3),
+          granularity: result.meta?.dataGranularity,
+        });
+      }
 
-      // Filtra null/NaN, deduplicai timestamp — LW Charts richiede serie strettamente crescente
+      // Costruisce barre — filtra invalidi, deduplica, ordina
       const seen = new Set();
       const bars = ts
-        .map((t, i) => ({
-          time:  toTime(t),
-          open:  q.open[i],
-          high:  q.high[i],
-          low:   q.low[i],
-          close: q.close[i],
+        .map((raw, i) => ({
+          time:  toTime(raw),
+          open:  q.open?.[i]  ?? null,
+          high:  q.high?.[i]  ?? null,
+          low:   q.low?.[i]   ?? null,
+          close: q.close?.[i] ?? null,
         }))
         .filter(b => {
-          // Valida time: toTime(null/undefined) produce 'NaN-NaN-NaN' o NaN → LW Charts crasha
-          const timeOk = isDaily
-            ? (typeof b.time === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.time))
-            : (typeof b.time === 'number' && isFinite(b.time) && b.time > 0);
-          if (!timeOk) return false;
-          if (b.open == null || b.high == null || b.low == null || b.close == null) return false;
-          if (!isFinite(b.open) || !isFinite(b.high) || !isFinite(b.low) || !isFinite(b.close)) return false;
+          if (!isValidTime(b.time)) return false;
+          if (b.open  == null || b.high  == null ||
+              b.low   == null || b.close == null)  return false;
+          if (!isFinite(b.open)  || !isFinite(b.high) ||
+              !isFinite(b.low)   || !isFinite(b.close)) return false;
           if (b.open <= 0) return false;
-          if (seen.has(b.time)) return false;
-          seen.add(b.time);
+          // Deduplica per time
+          const key = String(b.time);
+          if (seen.has(key)) return false;
+          seen.add(key);
           return true;
         })
         .sort((a, b_) => {
+          // Ordine strettamente crescente (richiesto da LW Charts)
           if (typeof a.time === 'string') return a.time < b_.time ? -1 : a.time > b_.time ? 1 : 0;
           return a.time - b_.time;
         });
-      if (!bars.length) throw new Error('Empty bars');
+
+      if (bars.length === 0) throw new Error('Nessuna barra valida dopo filtraggio');
       return aggBars(bars, aggN);
     } catch (e) {
       lastErr = e;
@@ -4592,15 +4605,29 @@ const ChartView = ({ C, trades }) => {
       const yTP    = tr.tp ? priceToY(chart, series, tr.tp) : null;
       if (yEntry === null || ySL === null) return;
 
-      const entryTs = Math.floor(new Date(`${tr.date}T${tr.timeEntry}:00Z`).getTime() / 1000);
-      let xEntry = timeToX(chart, entryTs);
+      // Rileva il formato del time dall'array bars corrente
+      // Se le barre hanno time stringa → siamo in daily, usiamo YYYY-MM-DD
+      // Se hanno time numerico → siamo in intraday, usiamo unix secondi
+      const firstBarTime = bars[0]?.time;
+      const isBarDaily = typeof firstBarTime === 'string';
+
+      const makeTime = (dateStr, timeStr) => {
+        if (!dateStr) return null;
+        if (isBarDaily) return dateStr; // LW Charts daily vuole 'YYYY-MM-DD'
+        const iso = timeStr ? `${dateStr}T${timeStr.slice(0,5)}:00Z` : `${dateStr}T00:00:00Z`;
+        const ms = new Date(iso).getTime();
+        return isFinite(ms) ? Math.trunc(ms / 1000) : null;
+      };
+
+      const entryTs = makeTime(tr.date, tr.timeEntry);
+      let xEntry = entryTs !== null ? timeToX(chart, entryTs) : null;
       if (xEntry === null) xEntry = 0;
 
       let xExit;
       if (!tr.open && tr.dateExit && tr.timeExit) {
         // Trade chiuso: aggancia esattamente alla candela di exit
-        const exitTs = Math.floor(new Date(`${tr.dateExit}T${tr.timeExit}:00Z`).getTime() / 1000);
-        const xExitRaw = timeToX(chart, exitTs);
+        const exitTs = makeTime(tr.dateExit, tr.timeExit);
+        const xExitRaw = exitTs !== null ? timeToX(chart, exitTs) : null;
         // Arrotonda alla candela più vicina (+ metà candela per includere la candela stessa)
         xExit = xExitRaw !== null ? xExitRaw + candleW * 0.5 : null;
       }
@@ -4728,6 +4755,12 @@ const ChartView = ({ C, trades }) => {
     chartRef.current  = chart;
     seriesRef.current = series;
 
+    // Inizializza subito le dimensioni del canvas overlay
+    if (canvasRef.current) {
+      canvasRef.current.width  = el.clientWidth;
+      canvasRef.current.height = el.clientHeight;
+    }
+
     // Aggiorna canvas size al resize
     resizeObsRef.current = new ResizeObserver(() => {
       if (!chartRef.current || !el) return;
@@ -4763,7 +4796,7 @@ const ChartView = ({ C, trades }) => {
     if (!seriesRef.current) return;
     try {
       setError(null);
-      const bars = await fetchYahooOHLC(tf);
+      const bars = await fetchYahooOHLC(tf, setDebugInfo);
       if (!seriesRef.current) return;
       barsRef.current = bars;
       seriesRef.current.setData(bars);
