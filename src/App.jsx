@@ -2190,11 +2190,19 @@ const IconAnalytics = ({ color }) => (
   </svg>
 );
 
+const IconChart = ({ color }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+    <rect x="2" y="2" width="20" height="20" rx="2" stroke={color} strokeWidth="1.8"/>
+    <path d="M6 16l3-4 3 3 3-6 3 4" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
 const tabIcons = (C) => ({
   daily:     { glyph: IconToday,     gradient: `linear-gradient(135deg, ${C.green}, #14a300)` },
   temporal:  { glyph: IconHistory,   gradient: `linear-gradient(135deg, ${C.cyan}, #0099b3)` },
   metrics:   { glyph: IconStats,     gradient: `linear-gradient(135deg, ${C.red}, #b3001a)` },
   stats:     { glyph: IconAnalytics, gradient: `linear-gradient(135deg, ${C.pink}, #7a2eb5)` },
+  chart:     { glyph: IconChart,     gradient: `linear-gradient(135deg, ${C.purple}, #6a00c8)` },
 });
 
 /* ============= RISK BAR (protezioni) ============= */
@@ -2512,8 +2520,8 @@ const DailyView = ({ C, now, settings, trades, equity }) => {
         <SectionHeader C={C}>Trade del giorno</SectionHeader>
           <div className="flex flex-wrap gap-1.5 mb-3">
             <FilterChip C={C} label="Tutti" count={counts.ALL}   active={filter==='ALL'}   onClick={()=>setFilter('ALL')}/>
-            <FilterChip C={C} label="Long"  count={counts.LONG}  active={filter==='LONG'}  onClick={()=>setFilter('LONG')}/>
-            <FilterChip C={C} label="Short" count={counts.SHORT} active={filter==='SHORT'} onClick={()=>setFilter('SHORT')}/>
+            <FilterChip C={C} label="↑" count={counts.LONG}  active={filter==='LONG'}  onClick={()=>setFilter('LONG')}/>
+            <FilterChip C={C} label="↓" count={counts.SHORT} active={filter==='SHORT'} onClick={()=>setFilter('SHORT')}/>
             <FilterChip C={C} label="TP"    count={counts.TP}    active={filter==='TP'}    onClick={()=>setFilter('TP')}/>
             <FilterChip C={C} label="SL"    count={counts.SL}    active={filter==='SL'}    onClick={()=>setFilter('SL')}/>
             <FilterChip C={C} label="BE"    count={counts.BE}    active={filter==='BE'}    onClick={()=>setFilter('BE')}/>
@@ -3951,49 +3959,40 @@ class ErrorBoundary extends React.Component {
 
 /* ============= METRICHE STANDALONE PAGE ============= */
 const MetricheView = ({ C, trades }) => {
-  const stats = useMemo(() => computeAllStats(trades || []), [trades]);
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3 px-1">
-        <h1 style={{fontFamily:FONT.display,fontSize:28,fontWeight:700,letterSpacing:'-0.6px',color:C.primary, ...neonText(C.red, C.scheme)}}>Metriche</h1>
-      </div>
-      <ErrorBoundary C={C}>
-        <MetricsView C={C} stats={stats}/>
-      </ErrorBoundary>
-    </div>
-  );
-};
-
-/* ============= STATS ROOT ============= */
-const StatsView = ({ C, trades }) => {
   const [confluences] = usePersistedState('xt_confluences', {});
   const [confidence]  = usePersistedState('xt_confidence',  {});
   const stats = useMemo(() => computeAllStats(trades || []), [trades]);
   const confBreakdown = useMemo(() => computeConfluenceBreakdown(trades, confluences), [trades, confluences]);
   const confCorr      = useMemo(() => computeConfidenceBreakdown(trades, confidence),  [trades, confidence]);
-  const [subTab, setSubTab] = usePersistedState('xt_stats_subtab', 'breakdown');
+  const [subTab, setSubTab] = usePersistedState('xt_stats_subtab', 'metrics');
 
-  const subOptions = ['Statistiche','Analytics'];
-  const subMap     = { Statistiche:'breakdown', Analytics:'analytics' };
-  const subMapRev  = { breakdown:'Statistiche', analytics:'Analytics' };
+  const subOptions = ['Metriche', 'Statistiche'];
+  const subMap     = { 'Metriche':'metrics', 'Statistiche':'breakdown' };
+  const subMapRev  = { 'metrics':'Metriche', 'breakdown':'Statistiche' };
 
   const handleSubTab = (v) => {
-    setSubTab(subMap[v] || 'breakdown');
+    setSubTab(subMap[v] || 'metrics');
     window.scrollTo({ top: 0, behavior: 'instant' });
   };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3 px-1">
-        <h1 style={{fontFamily:FONT.display,fontSize:28,fontWeight:700,letterSpacing:'-0.6px',color:C.primary, ...neonText(C.primary, C.scheme)}}>Performance</h1>
-        <SegmentedControl C={C} options={subOptions} value={subMapRev[subTab] || 'Statistiche'} onChange={handleSubTab}/>
+        <SegmentedControl C={C} options={subOptions} value={subMapRev[subTab] || 'Metriche'} onChange={handleSubTab}/>
       </div>
-
-      {subTab === 'breakdown' && <ErrorBoundary C={C}><BreakdownView C={C} trades={trades} stats={stats} confluences={confluences} confidence={confidence} confBreakdown={confBreakdown} confCorr={confCorr}/></ErrorBoundary>}
-      {subTab === 'analytics' && <ErrorBoundary C={C}><AnalyticsView C={C} trades={trades}/></ErrorBoundary>}
+      {subTab === 'metrics' && <ErrorBoundary C={C}><MetricsView C={C} stats={stats}/></ErrorBoundary>}
+      {subTab === 'breakdown' && (
+        <ErrorBoundary C={C}>
+          <BreakdownView C={C} trades={trades} stats={stats} confluences={confluences} confidence={confidence} confBreakdown={confBreakdown} confCorr={confCorr}/>
+          <AnalyticsView C={C} trades={trades}/>
+        </ErrorBoundary>
+      )}
     </div>
   );
 };
+
+/* ============= STATS ROOT (unused — merged into MetricheView) ============= */
+const StatsView = ({ C, trades }) => <MetricheView C={C} trades={trades}/>;
 
 /* ============= ANALYTICS DATA ============= */
 
@@ -4357,6 +4356,386 @@ const AnalyticsView = ({ C, trades }) => {
   );
 };
 
+/* ============= CHART VIEW ============= */
+// Carica Lightweight Charts da CDN e dati OHLC da Yahoo Finance (proxy)
+// Replica il layout TV: sfondo OLED, candele bull #00ff00 / bear #ff00ff, no griglia
+// Disegna i trade del journal sopra come marker entry/exit + linee SL/TP
+
+const CHART_TF_OPTIONS = ['3m','7m','13m','17m','33m','90m','3h','6h','1D','3D'];
+const CHART_TF_LABELS  = {'3m':'M3','7m':'M7','13m':'M13','17m':'M17','33m':'M33','90m':'M90','3h':'H3','6h':'H6','1D':'D1','3D':'3D'};
+
+// Yahoo Finance interval/range per ogni timeframe (aggrega dove necessario)
+const TF_YF = {
+  '3m':  { interval:'1m',  range:'1d',  aggN:3  },
+  '7m':  { interval:'1m',  range:'2d',  aggN:7  },
+  '13m': { interval:'1m',  range:'2d',  aggN:13 },
+  '17m': { interval:'5m',  range:'5d',  aggN:17 },
+  '33m': { interval:'5m',  range:'5d',  aggN:33 },
+  '90m': { interval:'30m', range:'1mo', aggN:3  },
+  '3h':  { interval:'60m', range:'1mo', aggN:3  },
+  '6h':  { interval:'60m', range:'3mo', aggN:6  },
+  '1D':  { interval:'1d',  range:'1y',  aggN:1  },
+  '3D':  { interval:'1d',  range:'2y',  aggN:3  },
+};
+
+// Aggrega N barre consecutive in una
+const aggBars = (bars, n) => {
+  if (n <= 1) return bars;
+  const out = [];
+  for (let i = 0; i < bars.length; i += n) {
+    const slice = bars.slice(i, i + n);
+    if (!slice.length) continue;
+    out.push({
+      time:  slice[0].time,
+      open:  slice[0].open,
+      high:  Math.max(...slice.map(b => b.high)),
+      low:   Math.min(...slice.map(b => b.low)),
+      close: slice[slice.length - 1].close,
+    });
+  }
+  return out;
+};
+
+// Fetch OHLC da Yahoo Finance via allorigins proxy (no CORS)
+const fetchYahooOHLC = async (tf) => {
+  const { interval, range, aggN } = TF_YF[tf];
+  const symbol = 'XAUUSD%3DX';
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}&includePrePost=false`;
+  const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+  const res = await fetch(proxy);
+  const json = await res.json();
+  const data = JSON.parse(json.contents);
+  const result = data?.chart?.result?.[0];
+  if (!result) throw new Error('No data');
+  const ts = result.timestamp;
+  const q  = result.indicators.quote[0];
+  let bars = ts.map((t, i) => ({
+    time:  t,
+    open:  q.open[i],
+    high:  q.high[i],
+    low:   q.low[i],
+    close: q.close[i],
+  })).filter(b => b.open && b.high && b.low && b.close);
+  return aggBars(bars, aggN);
+};
+
+// Converte prezzo → pixel Y dentro il chart (area canvas)
+// Usa la scala corrente del chart LW
+const priceToY = (chart, series, price) => {
+  try { return series.priceToCoordinate(price); } catch { return null; }
+};
+const timeToX = (chart, time) => {
+  try { return chart.timeScale().timeToCoordinate(time); } catch { return null; }
+};
+
+const ChartView = ({ C, trades }) => {
+  const containerRef  = useRef(null);
+  const canvasRef     = useRef(null);
+  const chartRef      = useRef(null);
+  const seriesRef     = useRef(null);
+  const resizeObsRef  = useRef(null);
+  const pollRef       = useRef(null);
+  const barsRef       = useRef([]);
+
+  const [tf, setTf]               = usePersistedState('xt_chart_tf', '17m');
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState(null);
+  const [lastPrice, setLastPrice] = useState(null);
+  const [lwReady, setLwReady]     = useState(false);
+
+  // Carica Lightweight Charts da CDN una volta sola
+  useEffect(() => {
+    if (window.LightweightCharts) { setLwReady(true); return; }
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js';
+    s.onload  = () => setLwReady(true);
+    s.onerror = () => setError('Errore caricamento libreria chart');
+    document.head.appendChild(s);
+  }, []);
+
+  // Disegna i rettangoli TV-style sul canvas overlay
+  const drawTrades = useCallback(() => {
+    const canvas = canvasRef.current;
+    const chart  = chartRef.current;
+    const series = seriesRef.current;
+    const bars   = barsRef.current;
+    if (!canvas || !chart || !series || !bars.length) return;
+
+    const ctx = canvas.getContext('2d');
+    const W   = canvas.width;
+    const H   = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // Calcola larghezza di una candela in pixel per estendere i trade aperti
+    const visRange = chart.timeScale().getVisibleLogicalRange();
+    let candleW = 8; // fallback
+    if (visRange && bars.length > 1) {
+      const visibleBars = visRange.to - visRange.from;
+      if (visibleBars > 0) candleW = W / visibleBars;
+    }
+    // xMax per trade aperti: ultima barra visibile + 3.5 candele (al centro della 4a)
+    const xOpenEnd = W + candleW * 0.5; // leggermente oltre il bordo destro
+
+    trades.forEach(tr => {
+      if (!tr.entry || !tr.sl) return;
+      const isLong = tr.dir === 'LONG' || tr.dir === 'BUY';
+
+      const yEntry = priceToY(chart, series, tr.entry);
+      const ySL    = priceToY(chart, series, tr.sl);
+      const yTP    = tr.tp ? priceToY(chart, series, tr.tp) : null;
+      if (yEntry === null || ySL === null) return;
+
+      const entryTs = Math.floor(new Date(`${tr.date}T${tr.timeEntry}:00Z`).getTime() / 1000);
+      let xEntry = timeToX(chart, entryTs);
+      if (xEntry === null) xEntry = 0;
+
+      let xExit;
+      if (!tr.open && tr.dateExit && tr.timeExit) {
+        // Trade chiuso: aggancia esattamente alla candela di exit
+        const exitTs = Math.floor(new Date(`${tr.dateExit}T${tr.timeExit}:00Z`).getTime() / 1000);
+        const xExitRaw = timeToX(chart, exitTs);
+        // Arrotonda alla candela più vicina (+ metà candela per includere la candela stessa)
+        xExit = xExitRaw !== null ? xExitRaw + candleW * 0.5 : null;
+      }
+
+      // Trade aperto: estendi 3-4 candele oltre l'ultima visibile
+      const xR = (!tr.open && xExit != null && xExit > xEntry)
+        ? xExit
+        : xOpenEnd + candleW * 3; // 3 candele fuori dal bordo visibile
+
+      const xL = xEntry;
+      if (xR - xL < 1) return;
+
+      // ── Zona SL ──
+      const ySlTop = Math.min(yEntry, ySL);
+      const ySlBot = Math.max(yEntry, ySL);
+      const slH    = ySlBot - ySlTop;
+      if (slH > 1) {
+        ctx.fillStyle = 'rgba(255,0,0,0.33)';
+        ctx.fillRect(xL, ySlTop, xR - xL, slH);
+      }
+
+      // ── Zona TP ──
+      let tpH = 0;
+      if (yTP !== null) {
+        const yTpTop = Math.min(yEntry, yTP);
+        const yTpBot = Math.max(yEntry, yTP);
+        tpH = yTpBot - yTpTop;
+        if (tpH > 1) {
+          ctx.fillStyle = 'rgba(0,240,255,0.30)';
+          ctx.fillRect(xL, yTpTop, xR - xL, tpH);
+        }
+      }
+
+      // ── RR label ──
+      const rr = tr.rr != null && tr.rr !== 0
+        ? tr.rr
+        : (() => {
+            if (!tr.tp || !tr.sl) return null;
+            const risk   = Math.abs(tr.entry - tr.sl);
+            const reward = Math.abs(tr.entry - (tr.tp || tr.entry));
+            return risk > 0 ? reward / risk : null;
+          })();
+
+      if (rr !== null && yTP !== null) {
+        const cx = xL + (xR - xL) / 2;
+        const cy = yEntry;
+        const rrText = `${Number(rr).toFixed(2)}R`;
+        const fontSize = 11;
+        ctx.font = `600 ${fontSize}px "Trebuchet MS", "Helvetica Neue", Arial, sans-serif`;
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        const tw = ctx.measureText(rrText).width;
+        const ph = 5, pw = 8, br = 3;
+        const bw = tw + pw * 2, bh = fontSize + ph * 2;
+        ctx.fillStyle = 'rgba(0,0,0,0.60)';
+        ctx.beginPath();
+        ctx.roundRect(cx - bw/2, cy - bh/2, bw, bh, br);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(rrText, cx, cy);
+      }
+    });
+  }, [trades]);
+
+  // Crea chart quando la libreria è pronta
+  useEffect(() => {
+    if (!lwReady || !containerRef.current) return;
+    const el = containerRef.current;
+
+    const chart = window.LightweightCharts.createChart(el, {
+      width:  el.clientWidth,
+      height: el.clientHeight,
+      layout: {
+        background: { type: 'solid', color: '#000000' },
+        textColor:  '#ffffff',
+        fontSize:   10,
+        fontFamily: 'SF Mono, ui-monospace, Menlo, monospace',
+      },
+      grid: {
+        vertLines: { visible: false },
+        horzLines: { visible: false },
+      },
+      crosshair: {
+        mode: 1,
+        vertLine: { color:'#636363', width:1, style:2, visible:true, labelVisible:true, labelBackgroundColor:'#000' },
+        horzLine: { color:'#636363', width:1, style:3, visible:true, labelVisible:true, labelBackgroundColor:'#000' },
+      },
+      rightPriceScale: {
+        visible:        true,
+        borderVisible:  false,
+        scaleMargins:   { top:0.07, bottom:0.07 },
+        ticksVisible:   true,
+        entireTextOnly: false,
+      },
+      leftPriceScale: { visible: false },
+      timeScale: {
+        borderVisible:  false,
+        timeVisible:    true,
+        secondsVisible: false,
+        rightOffset:    7,
+        barSpacing:     8,
+      },
+      watermark: {
+        visible:   true,
+        fontSize:  13,
+        horzAlign: 'left',
+        vertAlign: 'top',
+        color:     'rgba(255,255,255,0.85)',
+        text:      'XAUUSD',
+      },
+      handleScroll: { mouseWheel:true, pressedMouseMove:true, horzTouchDrag:true, vertTouchDrag:false },
+      handleScale:  { mouseWheel:true, pinch:true, axisPressedMouseMove:true },
+    });
+
+    const series = chart.addCandlestickSeries({
+      upColor:         '#000000',
+      downColor:       '#000000',
+      borderUpColor:   '#00ff00',
+      borderDownColor: '#ff00ff',
+      wickUpColor:     '#00ff00',
+      wickDownColor:   '#ff00ff',
+      priceFormat:     { type:'price', precision:2, minMove:0.01 },
+    });
+
+    chartRef.current  = chart;
+    seriesRef.current = series;
+
+    // Aggiorna canvas size al resize
+    resizeObsRef.current = new ResizeObserver(() => {
+      if (!chartRef.current || !el) return;
+      chartRef.current.applyOptions({ width:el.clientWidth, height:el.clientHeight });
+      if (canvasRef.current) {
+        canvasRef.current.width  = el.clientWidth;
+        canvasRef.current.height = el.clientHeight;
+      }
+      drawTrades();
+    });
+    resizeObsRef.current.observe(el);
+
+    // Ridisegna trade al pan/zoom
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => drawTrades());
+    chart.subscribeCrosshairMove(param => {
+      if (param.seriesData?.size) {
+        const d = param.seriesData.get(series);
+        if (d) setLastPrice(d.close);
+      }
+      drawTrades();
+    });
+
+    return () => {
+      resizeObsRef.current?.disconnect();
+      chart.remove();
+      chartRef.current  = null;
+      seriesRef.current = null;
+    };
+  }, [lwReady, drawTrades]);
+
+  // Carica dati + polling ogni 30s
+  const loadData = useCallback(async () => {
+    if (!seriesRef.current) return;
+    try {
+      setError(null);
+      const bars = await fetchYahooOHLC(tf);
+      if (!seriesRef.current) return;
+      barsRef.current = bars;
+      seriesRef.current.setData(bars);
+      setLastPrice(bars[bars.length - 1]?.close || null);
+      drawTrades();
+      setLoading(false);
+    } catch {
+      setError('Dati non disponibili — riprova tra poco.');
+      setLoading(false);
+    }
+  }, [tf, drawTrades]);
+
+  useEffect(() => {
+    if (!lwReady) return;
+    setLoading(true);
+    const run = async () => {
+      await new Promise(r => setTimeout(r, 100)); // attendi series init
+      loadData();
+    };
+    run();
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(loadData, 30_000);
+    return () => clearInterval(pollRef.current);
+  }, [lwReady, loadData, tf]);
+
+  return (
+    <div style={{ position:'absolute', inset:0, background:'#000', display:'flex', flexDirection:'column' }}>
+
+      {/* Toolbar TF */}
+      <div className="flex items-center justify-between px-3" style={{
+        height:44, background:'#000', borderBottom:'0.5px solid #14191d', flexShrink:0,
+      }}>
+        <div className="flex items-center gap-0.5">
+          {CHART_TF_OPTIONS.map(t => (
+            <button key={t} onClick={()=>{ haptic.light(); setTf(t); setLoading(true); }} className="xt-btn" style={{
+              padding:'5px 9px', borderRadius:7, border:'none',
+              background: tf===t ? 'rgba(255,255,255,0.14)' : 'transparent',
+              color:      tf===t ? '#ffffff' : 'rgba(255,255,255,0.38)',
+              fontSize:12, fontFamily: FONT.display, fontWeight:600,
+              cursor:'pointer', letterSpacing:'-0.2px',
+            }}>{CHART_TF_LABELS[t]}</button>
+          ))}
+        </div>
+        {lastPrice && (
+          <span style={{ color:'#ffffff', fontSize:12, fontFamily:FONT.mono, fontWeight:600, fontVariantNumeric:'tabular-nums' }}>
+            {lastPrice.toFixed(2)}
+          </span>
+        )}
+      </div>
+
+      {/* Chart + canvas overlay */}
+      <div ref={containerRef} style={{ flex:1, position:'relative', overflow:'hidden' }}>
+        <canvas ref={canvasRef} style={{ position:'absolute', inset:0, pointerEvents:'none', zIndex:5 }}/>
+
+        {loading && (
+          <div style={{ position:'absolute', inset:0, zIndex:10, display:'flex', alignItems:'center', justifyContent:'center', background:'#000' }}>
+            <div style={{ textAlign:'center' }}>
+              <div className="xt-live-dot" style={{ width:8, height:8, borderRadius:4, background:'#00ff00', margin:'0 auto 10px' }}/>
+              <span style={{ color:'#636363', fontSize:11, fontFamily:FONT.mono }}>Caricamento XAUUSD…</span>
+            </div>
+          </div>
+        )}
+        {error && !loading && (
+          <div style={{ position:'absolute', inset:0, zIndex:10, display:'flex', alignItems:'center', justifyContent:'center', background:'#000' }}>
+            <div style={{ textAlign:'center', padding:24 }}>
+              <div style={{ color:'#ff0000', fontSize:13, fontFamily:FONT.mono, marginBottom:12 }}>{error}</div>
+              <button onClick={()=>{ setLoading(true); loadData(); }} style={{
+                padding:'8px 18px', borderRadius:20,
+                background:'rgba(255,255,255,0.08)', border:'0.5px solid #636363',
+                color:'#fff', fontSize:12, fontFamily:FONT.mono, cursor:'pointer',
+              }}>Riprova</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 /* ============= SETTINGS DEFAULTS ============= */
 const SETTINGS_DEFAULTS = {
   cooldownEnabled:    true,
@@ -4408,7 +4787,7 @@ export default function TradingApp() {
   const [activeAccount, setActiveAccount]  = usePersistedState('xt_active_account', 'main');
   const [settingsOpen, setSettingsOpen]    = useState(false);
 
-  const TAB_ORDER = ['daily', 'temporal', 'metrics', 'stats'];
+  const TAB_ORDER = ['daily', 'temporal', 'metrics', 'chart'];
   const [tabIdx, setTabIdx] = useState(0);
   const tabIdxRef = useRef(0); // mirror di tabIdx, accessibile nei listener senza closure stale
 
@@ -4434,10 +4813,10 @@ export default function TradingApp() {
   };
 
   const tabs = [
-    { id:'daily',     label:'Oggi'        },
-    { id:'temporal',  label:'Storico'     },
-    { id:'metrics',   label:'Metriche'    },
-    { id:'stats',     label:'Performance' },
+    { id:'daily',    label:'Oggi'    },
+    { id:'temporal', label:'Storico' },
+    { id:'metrics',  label:'Stats'   },
+    { id:'chart',    label:'Chart'   },
   ];
   const streak       = useMemo(() => detectStreak(trades),  [trades]);
   const cooldownOn   = useMemo(() => settings.cooldownEnabled && detectCooldown(trades), [settings.cooldownEnabled, trades]);
@@ -4553,15 +4932,30 @@ export default function TradingApp() {
       </header>
 
       {/* PAGER — scrollabile solo nel content, non nella pagina */}
-      <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none', paddingBottom:'env(safe-area-inset-bottom, 0px)' }}>
-        <div className="max-w-7xl mx-auto px-5 py-4"
-          style={{ paddingBottom: 70 }}>
-          {TAB_ORDER[tabIdx] === 'daily'    && <ErrorBoundary C={C}><DailyView     C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
-          {TAB_ORDER[tabIdx] === 'temporal' && <ErrorBoundary C={C}><TemporalView  C={C} trades={trades} equity={equity}/></ErrorBoundary>}
-          {TAB_ORDER[tabIdx] === 'metrics'  && <ErrorBoundary C={C}><MetricheView  C={C} trades={trades}/></ErrorBoundary>}
-          {TAB_ORDER[tabIdx] === 'stats'    && <ErrorBoundary C={C}><StatsView     C={C} trades={trades}/></ErrorBoundary>}
+      {TAB_ORDER[tabIdx] !== 'chart' && (
+        <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none', paddingBottom:'env(safe-area-inset-bottom, 0px)' }}>
+          <div className="max-w-7xl mx-auto px-5 py-4"
+            style={{ paddingBottom: 70 }}>
+            {TAB_ORDER[tabIdx] === 'daily'    && <ErrorBoundary C={C}><DailyView     C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
+            {TAB_ORDER[tabIdx] === 'temporal' && <ErrorBoundary C={C}><TemporalView  C={C} trades={trades} equity={equity}/></ErrorBoundary>}
+            {TAB_ORDER[tabIdx] === 'metrics'  && <ErrorBoundary C={C}><MetricheView  C={C} trades={trades}/></ErrorBoundary>}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* CHART — fullscreen, position absolute sopra tutto tranne header e tab bar */}
+      {TAB_ORDER[tabIdx] === 'chart' && (
+        <div style={{
+          flex: 1,
+          position: 'relative',
+          overflow: 'hidden',
+          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 72px)',
+        }}>
+          <ErrorBoundary C={C}>
+            <ChartView C={C} trades={trades}/>
+          </ErrorBoundary>
+        </div>
+      )}
 
       {/* BOTTOM TAB BAR */}
       <div className="fixed left-1/2 z-50" style={{
@@ -4588,9 +4982,9 @@ export default function TradingApp() {
             const grad = icons[t.id]?.gradient;
             return (
               <button key={t.id} onClick={() => handleTabTap(i)}
-                      className="xt-tab-btn flex items-center gap-2"
+                      className="xt-tab-btn flex items-center"
                       style={{
-                        padding: active ? '7px 18px 7px 8px' : '7px 14px',
+                        padding: '7px 14px',
                         borderRadius: 30,
                         background: active ? (scheme==='dark'?'rgba(255,255,255,0.09)':'rgba(0,0,0,0.06)') : 'transparent',
                         border: 'none', cursor: 'pointer',
@@ -4608,12 +5002,6 @@ export default function TradingApp() {
                     </div>
                   )}
                 </div>
-                {active && (
-                  <span style={{
-                    fontSize: 14, fontFamily: FONT.text, fontWeight: 600,
-                    color: C.primary, letterSpacing: '-0.2px', paddingRight: 4,
-                  }}>{t.label}</span>
-                )}
               </button>
             );
           })}
@@ -4622,4 +5010,3 @@ export default function TradingApp() {
     </div>
   );
 }
-
