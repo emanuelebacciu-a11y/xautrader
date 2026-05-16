@@ -4290,7 +4290,7 @@ export default function TradingApp() {
         backdropFilter: 'saturate(200%) blur(32px)',
         WebkitBackdropFilter: 'saturate(200%) blur(32px)',
         borderBottom: `0.5px solid ${C.sep}`,
-        paddingTop: 'env(safe-area-inset-top, 0px)',
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) - 14px)',
       }}>
         <div className="absolute inset-0 xt-shimmer-overlay" style={{opacity: scheme==='dark'?1:0.4}}/>
         <div className="max-w-7xl mx-auto px-5 py-3 flex items-center justify-between relative">
@@ -4390,7 +4390,7 @@ export default function TradingApp() {
       {/* PAGER — scrollabile solo nel content, non nella pagina */}
       <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none' }}>
         <div className="max-w-7xl mx-auto px-5 py-4"
-          style={{ paddingBottom:'calc(env(safe-area-inset-bottom, 0px) + 96px)' }}>
+          style={{ paddingBottom:'calc(env(safe-area-inset-bottom, 0px) + 80px)' }}>
           {TAB_ORDER[tabIdx] === 'daily'    && <ErrorBoundary C={C}><DailyView    C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
           {TAB_ORDER[tabIdx] === 'temporal' && <ErrorBoundary C={C}><TemporalView C={C} trades={trades} equity={equity}/></ErrorBoundary>}
           {TAB_ORDER[tabIdx] === 'stats'    && <ErrorBoundary C={C}><StatsView    C={C} trades={trades}/></ErrorBoundary>}
@@ -4407,7 +4407,7 @@ export default function TradingApp() {
       {/* BOTTOM TAB BAR */}
       <div className="fixed left-1/2 z-50" style={{
         transform: 'translateX(-50%)',
-        bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
+        bottom: 'calc(env(safe-area-inset-bottom, 0px) + 6px)',
       }}>
         <div style={{
           background: C.glassBar,
