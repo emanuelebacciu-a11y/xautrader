@@ -4365,12 +4365,14 @@ const CHART_TF_OPTIONS = ['3m','7m','13m','17m','33m','90m','3h','6h','1D','3D']
 const CHART_TF_LABELS  = {'3m':'M3','7m':'M7','13m':'M13','17m':'M17','33m':'M33','90m':'M90','3h':'H3','6h':'H6','1D':'D1','3D':'3D'};
 
 // Yahoo Finance interval/range per ogni timeframe (aggrega dove necessario)
+// aggN: quante barre base unire in una → il TF risultante è interval*aggN
+// Esempi corretti: 3m = 1m*3, 7m = 1m*7, 17m = 1m*17, 90m = 30m*3
 const TF_YF = {
   '3m':  { interval:'1m',  range:'1d',  aggN:3  },
   '7m':  { interval:'1m',  range:'2d',  aggN:7  },
   '13m': { interval:'1m',  range:'2d',  aggN:13 },
-  '17m': { interval:'5m',  range:'5d',  aggN:17 },
-  '33m': { interval:'5m',  range:'5d',  aggN:33 },
+  '17m': { interval:'1m',  range:'5d',  aggN:17 },
+  '33m': { interval:'1m',  range:'5d',  aggN:33 },
   '90m': { interval:'30m', range:'1mo', aggN:3  },
   '3h':  { interval:'60m', range:'1mo', aggN:3  },
   '6h':  { interval:'60m', range:'3mo', aggN:6  },
@@ -4430,13 +4432,22 @@ const fetchYahooOHLC = async (tf) => {
       if (!result) throw new Error('No data');
       const ts = result.timestamp;
       const q  = result.indicators.quote[0];
-      const bars = ts.map((t, i) => ({
-        time:  t,
-        open:  q.open[i],
-        high:  q.high[i],
-        low:   q.low[i],
-        close: q.close[i],
-      })).filter(b => b.open && b.high && b.low && b.close);
+      // Filtra null/NaN e deduplicai timestamp — LW Charts richiede serie strettamente crescente
+      const seen = new Set();
+      const bars = ts
+        .map((t, i) => ({
+          time:  t,
+          open:  q.open[i],
+          high:  q.high[i],
+          low:   q.low[i],
+          close: q.close[i],
+        }))
+        .filter(b =>
+          b.open != null && b.high != null && b.low != null && b.close != null &&
+          isFinite(b.open) && isFinite(b.high) && isFinite(b.low) && isFinite(b.close) &&
+          b.open > 0 && !seen.has(b.time) && seen.add(b.time)
+        )
+        .sort((a, b_) => a.time - b_.time);
       if (!bars.length) throw new Error('Empty bars');
       return aggBars(bars, aggN);
     } catch (e) {
@@ -4690,8 +4701,9 @@ const ChartView = ({ C, trades }) => {
       setLastPrice(bars[bars.length - 1]?.close || null);
       drawTrades();
       setLoading(false);
-    } catch {
-      setError('Dati non disponibili — riprova tra poco.');
+    } catch (err) {
+      console.error('[ChartView] loadData error:', err);
+      setError(`Dati non disponibili — ${err?.message || 'riprova tra poco.'}`);
       setLoading(false);
     }
   }, [tf, drawTrades]);
