@@ -3974,9 +3974,7 @@ const StreakDistribution = ({ C, data }) => {
 
 /* ============= MAE/MFE SCATTER ============= */
 const MaeMfeScatter = ({ C, data }) => {
-  const pts = (data || []).filter(t => t.mae || t.mfe).map((t,i) => ({id:i,mae:t.mae||0,mfe:t.mfe||0,pnl:t.pnl,label:t.basket||`T${i+1}`}));
-  const max  = pts.length ? Math.max(...pts.map(d => Math.abs(d.mfe) || 1), 1) : 1;
-  const minM = pts.length ? Math.min(...pts.map(d => d.mae || 0)) : -1;
+  const pts = (data || []).filter(t => t.mae || t.mfe).map((t,i) => ({id:i,mae:t.mae||0,mfe:t.mfe||0,pnl:t.pnl||0,label:t.basket||`T${i+1}`}));
   if (pts.length === 0) return (
     <Glass C={C}>
       <SectionHeader C={C}>MAE / MFE Scatter</SectionHeader>
@@ -3986,10 +3984,12 @@ const MaeMfeScatter = ({ C, data }) => {
       </div>
     </Glass>
   );
+  const mfeMax = pts.reduce((a,d) => Math.max(a, Math.abs(d.mfe)||1), 1);
+  const maeMin = pts.reduce((a,d) => Math.min(a, d.mae||0), -1);
   const W = 320, H = 220, PX = 40, PY = 20;
 
-  const xScale = (v) => PX + ((v - minM) / (-minM)) * (W - PX - 10);
-  const yScale = (v) => PY + (1 - v/max) * (H - PY - 20);
+  const xScale = (v) => PX + ((v - maeMin) / (-maeMin || 1)) * (W - PX - 10);
+  const yScale = (v) => PY + (1 - v / mfeMax) * (H - PY - 20);
 
   return (
     <Glass C={C}>
