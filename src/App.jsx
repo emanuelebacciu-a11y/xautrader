@@ -4406,6 +4406,7 @@ export default function TradingApp() {
       WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale',
       
       position: 'fixed', inset: 0,
+      paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       
       display: 'flex', flexDirection: 'column',
     }}>
@@ -4515,7 +4516,7 @@ export default function TradingApp() {
       {/* BOTTOM TAB BAR */}
       <div className="fixed left-1/2 z-50" style={{
         transform: 'translateX(-50%)',
-        bottom: 'max(env(safe-area-inset-bottom, 20px), 16px)',
+        bottom: 'max(env(safe-area-inset-bottom, 12px), 8px)',
       }}>
         <div style={{
           background: C.glassBar,
