@@ -601,6 +601,172 @@ const useLiveClock = () => {
   return now;
 };
 
+/* ============= SUPABASE LAYER =============
+   Legge i trade reali dalla tabella `trades` su Supabase.
+   Polling ogni 30s, cache localStorage `xt_sb_cache`.
+   ─────────────────────────────────────────────────── */
+const SB_URL  = 'https://gzbvlgxfbzazlazaxhia.supabase.co';
+const SB_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd6YnZsZ3hmYnphemxhemF4aGlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4MzEyOTUsImV4cCI6MjA5NDQwNzI5NX0.4UiQQ1Rr0tB7KfVMn6EcbMwBdwmJq2HP4zlgzGvD71o';
+const POLL_MS = 30_000;
+
+// Converte numero/null da Supabase
+const _n = v => {
+  if (v == null || v === '') return 0;
+  const p = parseFloat(String(v).replace(',', '.'));
+  return isNaN(p) ? 0 : p;
+};
+
+// Normalizza data ISO → YYYY-MM-DD
+const _d = v => {
+  if (!v) return '';
+  const s = String(v).trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : s;
+};
+
+// Mappa riga Supabase → oggetto trade compatibile con l'app
+const mapRow = (e, idx) => {
+  const dateEntry = _d(e.date_entry);
+  const dateExit  = _d(e.date_exit);
+  const closed    = String(e.closed_to || '').toUpperCase().trim();
+  const isOpen    = !dateExit || !closed || closed === 'LIVE' || closed === '';
+
+  const partial = e.partial_exit_p != null && _n(e.partial_exit_p) > 0 ? {
+    exit:     _n(e.partial_exit_p),
+    size:     _n(e.partial_size),
+    pnl:      _n(e.partial_pnl),
+    rr:       _n(e.partial_rr),
+    date:     _d(e.partial_date),
+    time:     String(e.partial_time || '').slice(0, 5),
+    closedTo: String(e.partial_closed_to || '').toUpperCase(),
+  } : null;
+
+  return {
+    id:           e.id || idx + 1,
+    supabaseId:   e.id,
+    basket:       String(e.basket_id || `B-${1600 + idx}`),
+    partialIndex: _n(e.partial_index),
+    mt5Ticket:    e.mt5_ticket || null,
+    date:         dateEntry,
+    dateExit:     isOpen ? null : dateExit,
+    timeEntry:    String(e.time_entry || '').slice(0, 5),
+    timeExit:     isOpen ? null : String(e.time_exit || '').slice(0, 5),
+    duration:     _n(e.duration),
+    dir:          String(e.direction || 'LONG').toUpperCase().trim(),
+    session:      String(e.session || 'NEWYORK').toUpperCase().trim(),
+    entry:        _n(e.entry_p),
+    exit:         isOpen ? null : _n(e.exit_p) || null,
+    sl:           _n(e.sl_price),
+    tp:           _n(e.tp_price),
+    currentPrice: isOpen ? _n(e.exit_p) || null : null,
+    size:         _n(e.size) || 0.01,
+    spread:       _n(e.spread),
+    commission:   _n(e.commission),
+    swap:         _n(e.swap),
+    slippage:     0,
+    pnl:          _n(e.pnl),
+    pnlNetto:     _n(e.pnl_netto),
+    rr:           isOpen ? null : _n(e.rr) || null,
+    tradeType:    String(e.trade_type || ''),
+    closed:       isOpen ? null : closed || null,
+    equity:       _n(e.equity),
+    mae:          _n(e.mae),
+    mfe:          _n(e.mfe),
+    symbol:       String(e.symbol || 'XAUUSD'),
+    accountId:    String(e.account_id || 'main'),
+    partials:     partial ? [partial] : [],
+    tags:         [],
+    open:         isOpen,
+  };
+};
+
+// Raggruppa partial (partialIndex > 0) sul trade parent (partialIndex === 0)
+const groupTrades = rows => {
+  const map = {};
+  rows.forEach(r => {
+    if (!map[r.basket]) map[r.basket] = { parent: null, partials: [] };
+    if (r.partialIndex === 0) map[r.basket].parent = r;
+    else {
+      map[r.basket].partials.push(...r.partials);
+      if (map[r.basket].parent) {
+        map[r.basket].parent.pnl      += r.pnl;
+        map[r.basket].parent.pnlNetto += r.pnlNetto;
+      }
+    }
+  });
+  const out = [];
+  Object.values(map).forEach(({ parent, partials }) => {
+    if (!parent) return;
+    parent.partials = partials.sort((a, b) =>
+      (a.date || '').localeCompare(b.date || '') || (a.time || '').localeCompare(b.time || ''));
+    out.push(parent);
+  });
+  return out.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id);
+};
+
+// Costruisce equity curve dai trade chiusi
+const buildEquityCurve = (trades, balanceInit = 10000) => {
+  const byDate = {};
+  trades.filter(t => !t.open).forEach(t => { byDate[t.date] = (byDate[t.date] || 0) + t.pnl; });
+  const dates = Object.keys(byDate).sort();
+  const curve = [{ day: 'Dep.', value: balanceInit, dateKey: null }];
+  let eq = balanceInit;
+  dates.forEach(d => {
+    eq += byDate[d];
+    const [, mm, dd] = d.split('-');
+    curve.push({ day: `${dd}/${mm}`, value: Math.round(eq * 100) / 100, dateKey: d });
+  });
+  return curve;
+};
+
+// Hook principale — fetch + polling + cache
+const useSupabaseData = () => {
+  const [state, setState] = React.useState({
+    loading: true, error: null, trades: null, equity: null, lastSync: null, fromLocal: false,
+  });
+
+  const fetch_ = React.useCallback(async (force = false) => {
+    if (!force) setState(s => ({ ...s, loading: true, error: null }));
+    try {
+      const res = await fetch(
+        `${SB_URL}/rest/v1/trades?select=*&order=date_entry.asc,partial_index.asc`,
+        { headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' } }
+      );
+      if (!res.ok) {
+        const err = await res.text().catch(() => res.statusText);
+        throw new Error(`HTTP ${res.status}: ${err}`);
+      }
+      const rows = await res.json();
+      if (!Array.isArray(rows) || rows.length === 0) {
+        setState({ loading: false, error: null, trades: [], equity: [], lastSync: new Date(), fromLocal: false });
+        return;
+      }
+      const mapped  = rows.map((r, i) => mapRow(r, i)).filter(t => t.date && t.date.length >= 10);
+      const grouped = groupTrades(mapped);
+      const equity  = buildEquityCurve(grouped);
+      try { localStorage.setItem('xt_sb_cache', JSON.stringify({ trades: grouped, equity, ts: Date.now() })); } catch(_) {}
+      setState({ loading: false, error: null, trades: grouped, equity, lastSync: new Date(), fromLocal: false });
+    } catch (err) {
+      // Fallback cache
+      let fromLocal = false, trades = null, equity = null;
+      try {
+        const cache = JSON.parse(localStorage.getItem('xt_sb_cache') || 'null');
+        if (cache && Array.isArray(cache.trades)) { trades = cache.trades; equity = cache.equity; fromLocal = true; }
+      } catch(_) {}
+      setState(s => ({ ...s, loading: false, error: err.message, trades, equity, lastSync: new Date(), fromLocal }));
+    }
+  }, []);
+
+  // Mount fetch + polling ogni 30s
+  React.useEffect(() => {
+    fetch_();
+    const id = setInterval(() => fetch_(true), POLL_MS);
+    return () => clearInterval(id);
+  }, [fetch_]);
+
+  return { ...state, refetch: () => fetch_() };
+};
+
 /* ============= CONF COLORS ============= */
 const CONF_COLORS_MAP = {
   FIBREVERSE: '#C77DFF', '3D': '#C77DFF', SWEEP: '#C77DFF',
@@ -1388,7 +1554,7 @@ const SettingsModal = ({ C, open, onClose, settings, setSettings, accounts, acti
         </div>
 
         <div style={{color:C.tertiary,fontSize:10,fontFamily:FONT.mono,marginTop:20,textAlign:'center'}}>
-          XAUTRADER · v1.1 · backup cloud in arrivo
+          Journal · v1.1
         </div>
       </div>
     </div>
@@ -3367,28 +3533,52 @@ const BreakdownView = ({ C, trades, stats, confluences, confidence, confBreakdow
 /* ============= SETUP EDGE DATA ============= */
 // Combinazioni di confluenze — ordinate per WR reale sui trade registrati
 // Esempi di riferimento setup — verranno calcolati dai trade reali una volta disponibili
-const setupCombos = [
-  { combo:'ORIGINE + OBB',                    trades:8,  wr:88, rr:2.8, pnl:312.00, avg:39.0,  colors:['#7DF9FF','#7DF9FF'] },
-  { combo:'ORIGINE + VWAP ▲',                 trades:7,  wr:86, rr:2.6, pnl:285.00, avg:40.7,  colors:['#7DF9FF','#FFB627'] },
-  { combo:'OBB + FIBREVERSE',                 trades:6,  wr:83, rr:2.5, pnl:245.00, avg:40.8,  colors:['#7DF9FF','#C77DFF'] },
-  { combo:'ORIGINE + 3D',                     trades:6,  wr:83, rr:2.3, pnl:210.00, avg:35.0,  colors:['#7DF9FF','#C77DFF'] },
-  { combo:'ORIGINE + OBB + VWAP ▲',           trades:5,  wr:80, rr:2.9, pnl:198.00, avg:39.6,  colors:['#7DF9FF','#7DF9FF','#FFB627'] },
-  { combo:'OBB + POC',                        trades:5,  wr:80, rr:2.4, pnl:188.00, avg:37.6,  colors:['#7DF9FF','#C77DFF'] },
-  { combo:'FIBREVERSE + ORIGINE',             trades:5,  wr:80, rr:2.2, pnl:175.00, avg:35.0,  colors:['#C77DFF','#7DF9FF'] },
-  { combo:'ORIGINE + SWEEP',                  trades:4,  wr:75, rr:2.4, pnl:142.00, avg:35.5,  colors:['#7DF9FF','#C77DFF'] },
-  { combo:'OBB + VWAP ▲ + POC',              trades:4,  wr:75, rr:2.6, pnl:155.00, avg:38.8,  colors:['#7DF9FF','#FFB627','#C77DFF'] },
-  { combo:'ORIGINE REVERSE + OBB',            trades:4,  wr:75, rr:2.1, pnl:128.00, avg:32.0,  colors:['#7DF9FF','#7DF9FF'] },
-  { combo:'3D + OBB + FIBREVERSE',            trades:3,  wr:67, rr:2.5, pnl: 98.00, avg:32.7,  colors:['#C77DFF','#7DF9FF','#C77DFF'] },
-  { combo:'VWAP ▲ + POC + ORIGINE',          trades:3,  wr:67, rr:2.3, pnl: 85.00, avg:28.3,  colors:['#FFB627','#C77DFF','#7DF9FF'] },
-  { combo:'FIBREVERSE + SWEEP + OBB',         trades:3,  wr:67, rr:2.0, pnl: 72.00, avg:24.0,  colors:['#C77DFF','#C77DFF','#7DF9FF'] },
-  { combo:'ORIGINE REVERSE + VWAP ▼',        trades:3,  wr:67, rr:1.8, pnl: 62.00, avg:20.7,  colors:['#7DF9FF','#FFB627'] },
-  { combo:'OBV + OBB',                        trades:3,  wr:67, rr:1.9, pnl: 68.00, avg:22.7,  colors:['#7DF9FF','#7DF9FF'] },
-];
+// setupCombos: calcolato dai trade reali + confluences localStorage
+// Nessun dato mock — appare solo quando ci sono trade taggati
 
 /* ============= SETUP EDGE VIEW ============= */
 const SetupEdgeView = ({ C }) => {
-  const sorted = [...setupCombos]
-    .sort((a,b) => b.wr !== a.wr ? b.wr - a.wr : b.trades - a.trades);
+  const [confluences] = usePersistedState('xt_confluences', {});
+  const [allTrades]   = usePersistedState('xt_sb_cache', null);
+  const trades = React.useMemo(() => {
+    try { const c = JSON.parse(localStorage.getItem('xt_sb_cache') || 'null'); return c?.trades || []; } catch { return []; }
+  }, []);
+
+  // Calcola combo dai tag reali
+  const sorted = React.useMemo(() => {
+    const closed = trades.filter(t => !t.open);
+    if (closed.length === 0 || Object.keys(confluences).length === 0) return [];
+    const comboMap = {};
+    closed.forEach(trade => {
+      const conf = confluences[trade.id] || confluences[trade.basket];
+      if (!conf) return;
+      const names = [
+        ...(conf.noTF||[]).map(x=>x.name),
+        ...(conf.withTF||[]).map(x=>x.name),
+        ...(conf.vwap||[]).map(x=>x.bull&&x.bear?'VWAP KZ':x.bull?'VWAP ▲':'VWAP ▼'),
+      ];
+      if (names.length < 2) return;
+      const key = [...names].sort().join(' + ');
+      if (!comboMap[key]) comboMap[key] = { combo: names.join(' + '), trades:[], colors: names.map(n=>CONF_COLORS_MAP[n]||'#C77DFF') };
+      comboMap[key].trades.push(trade);
+    });
+    return Object.values(comboMap).map(({combo,trades:tl,colors}) => {
+      const wins = tl.filter(t=>t.pnl>0).length;
+      const pnl  = tl.reduce((s,t)=>s+t.pnl,0);
+      const rrs  = tl.filter(t=>t.rr>0).map(t=>t.rr);
+      return { combo, trades:tl.length, wr:Math.round(wins/tl.length*100), rr:rrs.length?rrs.reduce((s,r)=>s+r,0)/rrs.length:0, pnl, avg:pnl/tl.length, colors };
+    }).sort((a,b) => b.wr!==a.wr ? b.wr-a.wr : b.trades-a.trades);
+  }, [trades, confluences]);
+
+  if (sorted.length === 0) return (
+    <Glass C={C}>
+      <SectionHeader C={C}>Setup Edge · Combo</SectionHeader>
+      <div style={{color:C.tertiary,fontSize:13,textAlign:'center',padding:'24px 0',fontFamily:FONT.text}}>
+        Appare quando hai trade con confluenze multiple taggate.<br/>
+        <span style={{fontSize:11,opacity:0.6}}>Almeno 2 confluenze per trade.</span>
+      </div>
+    </Glass>
+  );
 
   return (
     <Glass C={C}>
@@ -3834,6 +4024,13 @@ const SETTINGS_DEFAULTS = {
 export default function TradingApp() {
   useEffect(() => { injectGlobalCSS(); injectPressManager(); }, []);
 
+  // ── Dati reali da Supabase ──────────────────────────
+  const { loading: sbLoading, error: sbError, trades: sbTrades,
+          equity: sbEquity, lastSync, fromLocal, refetch } = useSupabaseData();
+
+  const trades = sbTrades || [];
+  const equity = sbEquity || [];
+
   const sysScheme = useColorScheme();
   const [schemeOverride, setSchemeOverride] = usePersistedState('xt_scheme_override', 'auto');
   const scheme = schemeOverride === 'auto' ? sysScheme : schemeOverride;
@@ -3875,9 +4072,9 @@ export default function TradingApp() {
     { id:'temporal',  label:'Storico'     },
     { id:'stats',     label:'Performance' },
   ];
-  const streak       = useMemo(() => detectStreak([]), []);
-  const cooldownOn   = useMemo(() => settings.cooldownEnabled && detectCooldown([]), [settings.cooldownEnabled]);
-  const todayTrades  = useMemo(() => [], [new Date().toISOString().slice(0,10)]);
+  const streak       = useMemo(() => detectStreak(trades),  [trades]);
+  const cooldownOn   = useMemo(() => settings.cooldownEnabled && detectCooldown(trades), [settings.cooldownEnabled, trades]);
+  const todayTrades  = useMemo(() => { const d = new Date().toISOString().slice(0,10); return trades.filter(t => t.date === d); }, [trades]);
   const dailyLock    = useMemo(() => settings.dailyLockEnabled ? checkDailyTarget(todayTrades, settings.dailyTarget || 150) : { reached: false, pnl: 0 }, [settings.dailyLockEnabled, todayTrades, settings.dailyTarget]);
   const icons = useMemo(() => tabIcons(C), [C]);
   const timeStr = now.toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
@@ -3886,7 +4083,9 @@ export default function TradingApp() {
     <div className="relative" style={{
       background: C.bg, color: C.primary, fontFamily: FONT.text,
       WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale',
-      overflowX: 'hidden',
+      overflowX: 'hidden', overflowY: 'hidden',
+      height: '100dvh', maxHeight: '100dvh',
+      display: 'flex', flexDirection: 'column',
     }}>
       <div className="fixed inset-0 pointer-events-none" style={{ background: C.ambient }}/>
 
@@ -3916,7 +4115,7 @@ export default function TradingApp() {
               </AppIcon>
             </div>
             <div>
-              <div style={{fontFamily:FONT.display,fontSize:14,fontWeight:600,letterSpacing:'-0.3px',color:C.primary, ...neonText(C.cyan, C.scheme)}}> XAUTRADER</div>
+              <div style={{fontFamily:FONT.display,fontSize:14,fontWeight:600,letterSpacing:'-0.3px',color:C.primary, ...neonText(C.cyan, C.scheme)}}> Journal</div>
               <div style={{color:C.tertiary,fontSize:10,fontFamily:FONT.mono,marginTop:-1,fontVariantNumeric:'tabular-nums'}}>{timeStr} · {accounts.find(a=>a.id===activeAccount)?.broker || 'VT MARKETS'}</div>
             </div>
           </div>
@@ -3956,8 +4155,23 @@ export default function TradingApp() {
               background: C.glass2, backdropFilter:'blur(20px)', WebkitBackdropFilter:'blur(20px)',
               border: `0.5px solid ${C.sep}`, borderRadius: RADIUS.pill,
             }}>
-              <div className="w-1.5 h-1.5 rounded-full xt-live-dot" style={{background:C.green}}/>
-              <span style={{color:C.secondary,fontSize:11,fontFamily:FONT.text,fontWeight:500}}>Live</span>
+              <div className="w-1.5 h-1.5 rounded-full xt-live-dot" style={{
+                background: sbError ? C.red : sbLoading ? C.yellow : C.green,
+              }}/>
+              <span style={{color:C.secondary,fontSize:11,fontFamily:FONT.text,fontWeight:500}}>
+                {sbError ? 'Offline' : sbLoading ? 'Sync…' : fromLocal ? 'Cache' : 'Live'}
+              </span>
+              {!sbLoading && (
+                <button onClick={()=>{haptic.selection();refetch();}} style={{
+                  background:'none', border:'none', cursor:'pointer', padding:0,
+                  display:'flex', alignItems:'center', lineHeight:0,
+                }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none">
+                    <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"
+                      stroke={sbError ? C.red : C.tertiary} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              )}
             </div>
             {/* Dark mode toggle pill */}
             <button onClick={()=>setSchemeOverride(scheme==='dark'?'light':'dark')} className="xt-btn" style={{
@@ -3985,12 +4199,13 @@ export default function TradingApp() {
         </div>
       </header>
 
-      {/* PAGER — una sola tab alla volta, nessuno scroll nel vuoto */}
-      <div style={{ width:'100%' }}>
-        <div className="max-w-7xl mx-auto px-5 py-6 pb-32">
-          {TAB_ORDER[tabIdx] === 'daily'    && <DailyView    C={C} now={now} settings={settings} trades={[]}/>}
-          {TAB_ORDER[tabIdx] === 'temporal' && <TemporalView C={C} trades={[]} equity={[]}/>}
-          {TAB_ORDER[tabIdx] === 'stats'    && <StatsView    C={C} trades={[]}/>}
+      {/* PAGER — scrollabile solo nel content, non nella pagina */}
+      <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none' }}>
+        <div className="max-w-7xl mx-auto px-5 py-4"
+          style={{ paddingBottom:'calc(env(safe-area-inset-bottom, 0px) + 96px)' }}>
+          {TAB_ORDER[tabIdx] === 'daily'    && <DailyView    C={C} now={now} settings={settings} trades={trades} equity={equity}/>}
+          {TAB_ORDER[tabIdx] === 'temporal' && <TemporalView C={C} trades={trades} equity={equity}/>}
+          {TAB_ORDER[tabIdx] === 'stats'    && <StatsView    C={C} trades={trades}/>}
         </div>
       </div>
 

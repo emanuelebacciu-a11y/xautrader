@@ -1,40 +1,22 @@
 {
-  "name": "XAUTrader",
-  "short_name": "XAUTrader",
-  "description": "XAU/USD Trading Dashboard — Emanuele Bacciu",
+  "name": "Journal",
+  "short_name": "Journal",
+  "description": "XAU/USD Trading Journal — Emanuele Bacciu",
   "theme_color": "#000000",
   "background_color": "#000000",
   "display": "standalone",
   "orientation": "portrait-primary",
   "start_url": "/",
   "scope": "/",
-  "id": "xautrader-v1",
+  "id": "journal-v1",
   "categories": ["finance", "productivity"],
   "icons": [
-    {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
   ],
-  "screenshots": [],
   "shortcuts": [
-    {
-      "name": "Oggi",
-      "url": "/?tab=daily",
-      "description": "Vista giornaliera"
-    },
-    {
-      "name": "Performance",
-      "url": "/?tab=stats",
-      "description": "Statistiche complete"
-    }
+    { "name": "Oggi", "url": "/?tab=daily", "description": "Vista giornaliera" },
+    { "name": "Performance", "url": "/?tab=stats", "description": "Statistiche complete" }
   ]
 }
