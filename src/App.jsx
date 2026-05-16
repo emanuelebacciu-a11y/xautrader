@@ -4448,16 +4448,17 @@ export default function TradingApp() {
         backdropFilter: 'saturate(200%) blur(32px)',
         WebkitBackdropFilter: 'saturate(200%) blur(32px)',
         borderBottom: `0.5px solid ${C.sep}`,
+        marginTop: '-8px',
         paddingTop: 'env(safe-area-inset-top, 0px)',
       }}>
         <div className="absolute inset-0 xt-shimmer-overlay" style={{opacity: scheme==='dark'?1:0.4}}/>
-        <div className="max-w-7xl mx-auto px-4 py-2 flex items-center justify-between relative">
+        <div className="max-w-7xl mx-auto px-4 py-1 flex items-center justify-between relative">
           {/* Sinistra: nome conto attivo */}
           <div style={{
             fontFamily: FONT.text, fontSize: 13, fontWeight: 600,
             color: C.primary, letterSpacing: '-0.2px',
           }}>
-            {accounts.find(a => a.id === activeAccount)?.name || activeAccount}
+            {(() => { const n = accounts.find(a => a.id === activeAccount)?.name || activeAccount; const i = n.indexOf('· '); return i !== -1 ? n.slice(i + 2) : n; })()}
           </div>
           {/* Destra: streak + live + settings */}
           <div className="flex items-center gap-1.5">
@@ -4538,7 +4539,7 @@ export default function TradingApp() {
       {/* BOTTOM TAB BAR */}
       <div className="fixed left-1/2 z-50" style={{
         transform: 'translateX(-50%)',
-        bottom: 'max(env(safe-area-inset-bottom, 4px), 4px)',
+        bottom: 'max(env(safe-area-inset-bottom, 0px), -8px)',
       }}>
         <div style={{
           background: C.glassBar,
