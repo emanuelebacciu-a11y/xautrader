@@ -4290,6 +4290,7 @@ export default function TradingApp() {
         backdropFilter: 'saturate(200%) blur(32px)',
         WebkitBackdropFilter: 'saturate(200%) blur(32px)',
         borderBottom: `0.5px solid ${C.sep}`,
+        paddingTop: 'env(safe-area-inset-top, 0px)',
       }}>
         <div className="absolute inset-0 xt-shimmer-overlay" style={{opacity: scheme==='dark'?1:0.4}}/>
         <div className="max-w-7xl mx-auto px-5 py-3 flex items-center justify-between relative">
