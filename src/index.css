@@ -4,7 +4,19 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
-html, body {
+html {
+  margin: 0;
+  padding: 0;
+  background: #000;
+  width: 100%;
+  /* Usa --app-height calcolato da JS; fallback a 100dvh poi 100vh */
+  height: var(--app-height, 100dvh);
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
   margin: 0;
   padding: 0;
   background: #000;
@@ -12,7 +24,6 @@ html, body {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
-  -webkit-text-size-adjust: 100%;
   -webkit-overflow-scrolling: touch;
 }
 
