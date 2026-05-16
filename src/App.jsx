@@ -4454,6 +4454,41 @@ const fetchYahooOHLC = async (tf) => {
       if (!result) throw new Error('No data');
       const ts = result.timestamp;
       const q  = result.indicators.quote[0];
+
+      // ── DEBUG UI ──
+      const _isDaily = interval === '1d';
+      const _toTime = (unixSec) => {
+        if (_isDaily) {
+          const d = new Date(unixSec * 1000);
+          return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+        }
+        return unixSec > 1e10 ? Math.floor(unixSec/1000) : Math.floor(unixSec);
+      };
+      const _nullTs  = (ts||[]).filter(t => t == null).length;
+      const _nanTs   = (ts||[]).filter(t => typeof t === 'number' && isNaN(t)).length;
+      const _floatTs = (ts||[]).filter(t => typeof t === 'number' && !Number.isInteger(t)).length;
+      const _dupTs   = (ts||[]).length - new Set(ts||[]).size;
+      const _nullOpen = (q.open||[]).filter(v => v == null).length;
+      const _converted5 = (ts||[]).slice(0,5).map(t => _toTime(t));
+      const _badTimes = (ts||[]).map(t => _toTime(t)).filter(t =>
+        _isDaily
+          ? !(typeof t === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t))
+          : !(typeof t === 'number' && isFinite(t) && t > 0)
+      );
+      setDebugInfo({
+        tf, interval, range,
+        tsLen: (ts||[]).length,
+        ts0: ts?.[0], ts0type: typeof ts?.[0], ts0isMs: ts?.[0] > 1e10,
+        nullTs: _nullTs, nanTs: _nanTs, floatTs: _floatTs, dupTs: _dupTs,
+        nullOpen: _nullOpen, openLen: (q.open||[]).length,
+        converted5: _converted5,
+        badTimes: _badTimes.length,
+        badExamples: _badTimes.slice(0,3),
+        granularity: result.meta?.dataGranularity,
+        proxyName: tryProxy.name || '?',
+      });
+      // ── END DEBUG UI ──
+
       // Filtra null/NaN, deduplicai timestamp — LW Charts richiede serie strettamente crescente
       const seen = new Set();
       const bars = ts
@@ -4513,6 +4548,7 @@ const ChartView = ({ C, trades }) => {
   const [error, setError]         = useState(null);
   const [lastPrice, setLastPrice] = useState(null);
   const [lwReady, setLwReady]     = useState(false);
+  const [debugInfo, setDebugInfo] = useState(null);
 
   // Carica Lightweight Charts da CDN una volta sola
   useEffect(() => {
@@ -4793,15 +4829,26 @@ const ChartView = ({ C, trades }) => {
           </div>
         )}
         {error && !loading && (
-          <div style={{ position:'absolute', inset:0, zIndex:10, display:'flex', alignItems:'center', justifyContent:'center', background:'#000' }}>
-            <div style={{ textAlign:'center', padding:24 }}>
-              <div style={{ color:'#ff0000', fontSize:13, fontFamily:FONT.mono, marginBottom:12 }}>{error}</div>
-              <button onClick={()=>{ setLoading(true); loadData(); }} style={{
-                padding:'8px 18px', borderRadius:20,
-                background:'rgba(255,255,255,0.08)', border:'0.5px solid #636363',
-                color:'#fff', fontSize:12, fontFamily:FONT.mono, cursor:'pointer',
-              }}>Riprova</button>
-            </div>
+          <div style={{ position:'absolute', inset:0, zIndex:10, overflowY:'auto', background:'#000', padding:16 }}>
+            <div style={{ color:'#ff3333', fontSize:13, fontFamily:FONT.mono, marginBottom:12 }}>{error}</div>
+            {debugInfo && (
+              <div style={{ fontFamily:FONT.mono, fontSize:11, color:'#aaa', lineHeight:1.7 }}>
+                <div style={{ color:'#7DF9FF', marginBottom:6 }}>── YF DEBUG ──</div>
+                <div>tf: <span style={{color:'#fff'}}>{debugInfo.tf}</span> | interval: <span style={{color:'#fff'}}>{debugInfo.interval}</span> | range: <span style={{color:'#fff'}}>{debugInfo.range}</span></div>
+                <div>granularity: <span style={{color:'#fff'}}>{debugInfo.granularity}</span></div>
+                <div>ts length: <span style={{color:'#fff'}}>{debugInfo.tsLen}</span></div>
+                <div>ts[0]: <span style={{color:'#fff'}}>{String(debugInfo.ts0)}</span> | type: <span style={{color:'#fff'}}>{debugInfo.ts0type}</span> | ms?: <span style={{color:debugInfo.ts0isMs?'#ff3333':'#39FF14'}}>{String(debugInfo.ts0isMs)}</span></div>
+                <div>null ts: <span style={{color:debugInfo.nullTs>0?'#ff3333':'#39FF14'}}>{debugInfo.nullTs}</span> | NaN ts: <span style={{color:debugInfo.nanTs>0?'#ff3333':'#39FF14'}}>{debugInfo.nanTs}</span> | float ts: <span style={{color:debugInfo.floatTs>0?'#FFB627':'#39FF14'}}>{debugInfo.floatTs}</span> | dup ts: <span style={{color:debugInfo.dupTs>0?'#ff3333':'#39FF14'}}>{debugInfo.dupTs}</span></div>
+                <div>null opens: <span style={{color:debugInfo.nullOpen>0?'#FFB627':'#39FF14'}}>{debugInfo.nullOpen}</span> / {debugInfo.openLen}</div>
+                <div>toTime() first 5: <span style={{color:'#fff'}}>{JSON.stringify(debugInfo.converted5)}</span></div>
+                <div>BAD time values: <span style={{color:debugInfo.badTimes>0?'#ff3333':'#39FF14'}}>{debugInfo.badTimes}</span>{debugInfo.badTimes>0 && <span style={{color:'#ff3333'}}> → {JSON.stringify(debugInfo.badExamples)}</span>}</div>
+              </div>
+            )}
+            <button onClick={()=>{ setLoading(true); loadData(); }} style={{
+              marginTop:16, padding:'8px 18px', borderRadius:20,
+              background:'rgba(255,255,255,0.08)', border:'0.5px solid #636363',
+              color:'#fff', fontSize:12, fontFamily:FONT.mono, cursor:'pointer',
+            }}>Riprova</button>
           </div>
         )}
       </div>
