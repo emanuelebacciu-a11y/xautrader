@@ -4692,7 +4692,36 @@ const ChartView = ({ C, trades }) => {
     });
   }, [trades]);
 
-  // Crea chart quando la libreria è pronta
+  // tfRef: mirror di tf accessibile dentro callback async senza stale closure
+  const tfRef = useRef(tf);
+  useEffect(() => { tfRef.current = tf; }, [tf]);
+
+  // Crea una nuova candlestick series (chiamata sia al mount che ad ogni cambio TF)
+  // LW Charts NON permette di cambiare il tipo di timestamp (number↔string) sulla stessa
+  // istanza di series: passare da intraday (unix int) a daily ('YYYY-MM-DD') crasha con
+  // "The string did not match the expected pattern". Soluzione: rimuovi e ricrea la series.
+  const createSeries = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart) return null;
+    // Rimuovi series precedente se esiste
+    if (seriesRef.current) {
+      try { chart.removeSeries(seriesRef.current); } catch (_) {}
+      seriesRef.current = null;
+    }
+    const s = chart.addCandlestickSeries({
+      upColor:         '#000000',
+      downColor:       '#000000',
+      borderUpColor:   '#00ff00',
+      borderDownColor: '#ff00ff',
+      wickUpColor:     '#00ff00',
+      wickDownColor:   '#ff00ff',
+      priceFormat:     { type:'price', precision:2, minMove:0.01 },
+    });
+    seriesRef.current = s;
+    return s;
+  }, []);
+
+  // Crea chart quando la libreria è pronta (UNA SOLA VOLTA)
   useEffect(() => {
     if (!lwReady || !containerRef.current) return;
     const el = containerRef.current;
@@ -4742,26 +4771,15 @@ const ChartView = ({ C, trades }) => {
       handleScale:  { mouseWheel:true, pinch:true, axisPressedMouseMove:true },
     });
 
-    const series = chart.addCandlestickSeries({
-      upColor:         '#000000',
-      downColor:       '#000000',
-      borderUpColor:   '#00ff00',
-      borderDownColor: '#ff00ff',
-      wickUpColor:     '#00ff00',
-      wickDownColor:   '#ff00ff',
-      priceFormat:     { type:'price', precision:2, minMove:0.01 },
-    });
+    chartRef.current = chart;
 
-    chartRef.current  = chart;
-    seriesRef.current = series;
-
-    // Inizializza subito le dimensioni del canvas overlay
+    // Inizializza canvas overlay
     if (canvasRef.current) {
       canvasRef.current.width  = el.clientWidth;
       canvasRef.current.height = el.clientHeight;
     }
 
-    // Aggiorna canvas size al resize
+    // Aggiorna dimensioni al resize
     resizeObsRef.current = new ResizeObserver(() => {
       if (!chartRef.current || !el) return;
       chartRef.current.applyOptions({ width:el.clientWidth, height:el.clientHeight });
@@ -4773,56 +4791,74 @@ const ChartView = ({ C, trades }) => {
     });
     resizeObsRef.current.observe(el);
 
-    // Ridisegna trade al pan/zoom
+    // Ridisegna trade al pan/zoom e al crosshair
     chart.timeScale().subscribeVisibleLogicalRangeChange(() => drawTrades());
     chart.subscribeCrosshairMove(param => {
-      if (param.seriesData?.size) {
-        const d = param.seriesData.get(series);
+      if (param.seriesData?.size && seriesRef.current) {
+        const d = param.seriesData.get(seriesRef.current);
         if (d) setLastPrice(d.close);
       }
       drawTrades();
     });
 
     return () => {
+      clearInterval(pollRef.current);
       resizeObsRef.current?.disconnect();
       chart.remove();
       chartRef.current  = null;
       seriesRef.current = null;
     };
-  }, [lwReady, drawTrades]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lwReady]); // SOLO lwReady — il chart viene creato una volta sola
 
-  // Carica dati + polling ogni 30s
-  const loadData = useCallback(async () => {
-    if (!seriesRef.current) return;
+  // Carica dati: ricrea la series ad ogni cambio TF per evitare il type mismatch
+  const loadData = useCallback(async (requestedTf) => {
+    if (!chartRef.current) return;
+    const targetTf = requestedTf || tfRef.current;
     try {
       setError(null);
-      const bars = await fetchYahooOHLC(tf, setDebugInfo);
+      // Aggiorna timeVisible prima di ricaricare
+      chartRef.current.applyOptions({
+        timeScale: { timeVisible: !['1D','3D'].includes(targetTf) },
+      });
+      // RICREA la series — garantisce nessun residuo di tipo timestamp precedente
+      const series = createSeries();
+      if (!series) return;
+      barsRef.current = [];
+
+      const bars = await fetchYahooOHLC(targetTf, setDebugInfo);
+      // Controlla che il TF non sia cambiato durante il fetch (race condition)
+      if (tfRef.current !== targetTf) return;
       if (!seriesRef.current) return;
+
       barsRef.current = bars;
       seriesRef.current.setData(bars);
-      setLastPrice(bars[bars.length - 1]?.close || null);
+      setLastPrice(bars[bars.length - 1]?.close ?? null);
       drawTrades();
       setLoading(false);
     } catch (err) {
       console.error('[ChartView] loadData error:', err);
+      if (tfRef.current !== targetTf) return; // ignora errori di TF obsoleti
       setError(`Dati non disponibili — ${err?.message || 'riprova tra poco.'}`);
       setLoading(false);
     }
-  }, [tf, drawTrades]);
+  }, [createSeries, drawTrades]);
 
+  // Trigger al cambio TF o quando la lib è pronta
   useEffect(() => {
-    if (!lwReady) return;
-    if (chartRef.current) chartRef.current.applyOptions({ timeScale: { timeVisible: !["1D","3D"].includes(tf) } });
+    if (!lwReady || !chartRef.current) return;
     setLoading(true);
-    const run = async () => {
-      await new Promise(r => setTimeout(r, 100)); // attendi series init
-      loadData();
-    };
-    run();
     clearInterval(pollRef.current);
-    pollRef.current = setInterval(loadData, 30_000);
-    return () => clearInterval(pollRef.current);
-  }, [lwReady, loadData, tf]);
+    // Piccolo delay per garantire che il chart sia fully mounted al primo render
+    const t = setTimeout(() => {
+      loadData(tf);
+      pollRef.current = setInterval(() => loadData(tf), 30_000);
+    }, 80);
+    return () => {
+      clearTimeout(t);
+      clearInterval(pollRef.current);
+    };
+  }, [lwReady, tf, loadData]);
 
   return (
     <div style={{ position:'absolute', inset:0, background:'#000', display:'flex', flexDirection:'column' }}>
@@ -4877,7 +4913,7 @@ const ChartView = ({ C, trades }) => {
                 <div>BAD time values: <span style={{color:debugInfo.badTimes>0?'#ff3333':'#39FF14'}}>{debugInfo.badTimes}</span>{debugInfo.badTimes>0 && <span style={{color:'#ff3333'}}> → {JSON.stringify(debugInfo.badExamples)}</span>}</div>
               </div>
             )}
-            <button onClick={()=>{ setLoading(true); loadData(); }} style={{
+            <button onClick={()=>{ setLoading(true); loadData(tf); }} style={{
               marginTop:16, padding:'8px 18px', borderRadius:20,
               background:'rgba(255,255,255,0.08)', border:'0.5px solid #636363',
               color:'#fff', fontSize:12, fontFamily:FONT.mono, cursor:'pointer',
