@@ -2,14 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Prevent overscroll bounce on iOS */
-html, body {
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  background: #000;
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
+  overflow: hidden;
+  height: 100dvh;
+  height: -webkit-fill-available;
 }
 
-/* Safe area for notch / home indicator */
+/* Blocca bouncing iOS */
+body {
+  position: fixed;
+  width: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
 #root {
-  min-height: 100dvh;
-  min-height: -webkit-fill-available;
+  overflow: hidden;
+  position: relative;
+  height: 100%;
 }

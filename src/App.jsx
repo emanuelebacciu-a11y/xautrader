@@ -4275,6 +4275,8 @@ export default function TradingApp() {
       overflowX: 'hidden', overflowY: 'hidden',
       height: '100dvh', maxHeight: '100dvh',
       display: 'flex', flexDirection: 'column',
+      // Estende bg nella safe area bottom (home indicator iOS)
+      paddingBottom: 'env(safe-area-inset-bottom, 0px)',
     }}>
       <div className="fixed inset-0 pointer-events-none" style={{ background: C.ambient }}/>
 
@@ -4397,6 +4399,20 @@ export default function TradingApp() {
           {TAB_ORDER[tabIdx] === 'stats'    && <ErrorBoundary C={C}><StatsView    C={C} trades={trades}/></ErrorBoundary>}
         </div>
       </div>
+
+      {/* BOTTOM SAFE AREA — copre la barra home indicator iOS */}
+      <div style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 49,
+        height: 'env(safe-area-inset-bottom, 0px)',
+        background: C.bg,
+      }}/>
+
+      {/* iOS home indicator safe area fill */}
+      <div style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 49,
+        height: 'env(safe-area-inset-bottom, 0px)',
+        background: C.bg,
+      }}/>
 
       {/* BOTTOM TAB BAR */}
       <div className="fixed left-1/2 z-50" style={{
