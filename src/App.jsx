@@ -2191,9 +2191,10 @@ const IconAnalytics = ({ color }) => (
 );
 
 const tabIcons = (C) => ({
-  daily:     { glyph: IconToday,    gradient: `linear-gradient(135deg, ${C.green}, #14a300)` },
-  temporal:  { glyph: IconHistory,  gradient: `linear-gradient(135deg, ${C.cyan}, #0099b3)` },
-  stats:     { glyph: IconStats,    gradient: `linear-gradient(135deg, ${C.purple}, #7a2eb5)` },
+  daily:     { glyph: IconToday,     gradient: `linear-gradient(135deg, ${C.green}, #14a300)` },
+  temporal:  { glyph: IconHistory,   gradient: `linear-gradient(135deg, ${C.cyan}, #0099b3)` },
+  breakdown: { glyph: IconStats,     gradient: `linear-gradient(135deg, ${C.red}, #b3001a)` },
+  stats:     { glyph: IconAnalytics, gradient: `linear-gradient(135deg, ${C.pink}, #7a2eb5)` },
 });
 
 /* ============= RISK BAR (protezioni) ============= */
@@ -3948,6 +3949,26 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+/* ============= STATISTICHE STANDALONE PAGE ============= */
+const StatisticheView = ({ C, trades }) => {
+  const [confluences] = usePersistedState('xt_confluences', {});
+  const [confidence]  = usePersistedState('xt_confidence',  {});
+  const stats = useMemo(() => computeAllStats(trades || []), [trades]);
+  const confBreakdown = useMemo(() => computeConfluenceBreakdown(trades, confluences), [trades, confluences]);
+  const confCorr      = useMemo(() => computeConfidenceBreakdown(trades, confidence),  [trades, confidence]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3 px-1">
+        <h1 style={{fontFamily:FONT.display,fontSize:28,fontWeight:700,letterSpacing:'-0.6px',color:C.primary, ...neonText(C.red, C.scheme)}}>Statistiche</h1>
+      </div>
+      <ErrorBoundary C={C}>
+        <BreakdownView C={C} trades={trades} stats={stats} confluences={confluences} confidence={confidence} confBreakdown={confBreakdown} confCorr={confCorr}/>
+      </ErrorBoundary>
+    </div>
+  );
+};
+
 /* ============= STATS ROOT ============= */
 const StatsView = ({ C, trades }) => {
   const [confluences] = usePersistedState('xt_confluences', {});
@@ -3957,9 +3978,9 @@ const StatsView = ({ C, trades }) => {
   const confCorr      = useMemo(() => computeConfidenceBreakdown(trades, confidence),  [trades, confidence]);
   const [subTab, setSubTab] = usePersistedState('xt_stats_subtab', 'metrics');
 
-  const subOptions = ['Metriche','Statistiche','Analytics'];
-  const subMap     = { Metriche:'metrics', Statistiche:'breakdown', Analytics:'analytics' };
-  const subMapRev  = { metrics:'Metriche', breakdown:'Statistiche', analytics:'Analytics' };
+  const subOptions = ['Metriche','Analytics'];
+  const subMap     = { Metriche:'metrics', Analytics:'analytics' };
+  const subMapRev  = { metrics:'Metriche', analytics:'Analytics' };
 
   const handleSubTab = (v) => {
     setSubTab(subMap[v] || 'metrics');
@@ -3974,7 +3995,6 @@ const StatsView = ({ C, trades }) => {
       </div>
 
       {subTab === 'metrics'   && <ErrorBoundary C={C}><MetricsView   C={C} stats={stats}/></ErrorBoundary>}
-      {subTab === 'breakdown' && <ErrorBoundary C={C}><BreakdownView C={C} trades={trades} stats={stats} confluences={confluences} confidence={confidence} confBreakdown={confBreakdown} confCorr={confCorr}/></ErrorBoundary>}
       {subTab === 'analytics' && <ErrorBoundary C={C}><AnalyticsView C={C} trades={trades}/></ErrorBoundary>}
     </div>
   );
@@ -4393,7 +4413,7 @@ export default function TradingApp() {
   const [activeAccount, setActiveAccount]  = usePersistedState('xt_active_account', 'main');
   const [settingsOpen, setSettingsOpen]    = useState(false);
 
-  const TAB_ORDER = ['daily', 'temporal', 'stats'];
+  const TAB_ORDER = ['daily', 'temporal', 'breakdown', 'stats'];
   const [tabIdx, setTabIdx] = useState(0);
   const tabIdxRef = useRef(0); // mirror di tabIdx, accessibile nei listener senza closure stale
 
@@ -4421,6 +4441,7 @@ export default function TradingApp() {
   const tabs = [
     { id:'daily',     label:'Oggi'        },
     { id:'temporal',  label:'Storico'     },
+    { id:'breakdown', label:'Statistiche' },
     { id:'stats',     label:'Performance' },
   ];
   const streak       = useMemo(() => detectStreak(trades),  [trades]);
@@ -4540,9 +4561,10 @@ export default function TradingApp() {
       <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none', paddingBottom:'env(safe-area-inset-bottom, 0px)' }}>
         <div className="max-w-7xl mx-auto px-5 py-4"
           style={{ paddingBottom: 70 }}>
-          {TAB_ORDER[tabIdx] === 'daily'    && <ErrorBoundary C={C}><DailyView    C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
-          {TAB_ORDER[tabIdx] === 'temporal' && <ErrorBoundary C={C}><TemporalView C={C} trades={trades} equity={equity}/></ErrorBoundary>}
-          {TAB_ORDER[tabIdx] === 'stats'    && <ErrorBoundary C={C}><StatsView    C={C} trades={trades}/></ErrorBoundary>}
+          {TAB_ORDER[tabIdx] === 'daily'     && <ErrorBoundary C={C}><DailyView        C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
+          {TAB_ORDER[tabIdx] === 'temporal'  && <ErrorBoundary C={C}><TemporalView     C={C} trades={trades} equity={equity}/></ErrorBoundary>}
+          {TAB_ORDER[tabIdx] === 'breakdown' && <ErrorBoundary C={C}><StatisticheView  C={C} trades={trades}/></ErrorBoundary>}
+          {TAB_ORDER[tabIdx] === 'stats'     && <ErrorBoundary C={C}><StatsView        C={C} trades={trades}/></ErrorBoundary>}
         </div>
       </div>
 
