@@ -2995,14 +2995,32 @@ const EquityChartCard = ({ C, equity }) => {
       <DragChart C={C} data={equityRangeData} height={260} labelKey="day" valueKey="value" valuePrefix="$" valueColor={C.green}>
         <ResponsiveContainer width="100%" height={260}>
           <LineChart data={equityRangeData} margin={{top:5,right:5,left:-10,bottom:0}}>
+            <defs>
+              {(() => {
+                const vals = equityRangeData.map(d => d.value).filter(v => v != null);
+                const minV = Math.min(...vals) - 50;
+                const maxV = Math.max(...vals) + 50;
+                const range = maxV - minV || 1;
+                // posizione percentuale del deposito iniziale nella scala Y (0=bottom, 1=top in SVG è invertito)
+                const pct = Math.max(0, Math.min(1, (BALANCE_INIT - minV) / range));
+                // In SVG Y=0 è in alto, quindi invertiamo
+                const stopPct = `${((1 - pct) * 100).toFixed(1)}%`;
+                return (
+                  <linearGradient id="equityLineGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset={stopPct} stopColor={C.green} stopOpacity={1}/>
+                    <stop offset={stopPct} stopColor={C.red} stopOpacity={1}/>
+                  </linearGradient>
+                );
+              })()}
+            </defs>
             <CartesianGrid stroke={C.sep} vertical={false}/>
             <XAxis dataKey="day" tick={{fill:C.tertiary,fontSize:10,fontFamily:FONT.mono}} axisLine={false} tickLine={false} dy={8} interval="preserveStartEnd"/>
             <YAxis tick={{fill:C.tertiary,fontSize:11,fontFamily:FONT.mono}} axisLine={false} tickLine={false} domain={['dataMin - 50','dataMax + 50']}/>
             <ReferenceLine
-              y={equityRangeData[equityRangeData.length - 1]?.value}
-              stroke={C.green} strokeWidth={1} strokeDasharray="3 4" strokeOpacity={0.45}
+              y={BALANCE_INIT}
+              stroke={C.sep} strokeWidth={1} strokeDasharray="3 4" strokeOpacity={0.6}
             />
-            <Line type="monotone" dataKey="value" stroke={C.green} strokeWidth={1.75} dot={false} connectNulls={false} isAnimationActive={false}/>
+            <Line type="monotone" dataKey="value" stroke="url(#equityLineGrad)" strokeWidth={1.75} dot={false} connectNulls={false} isAnimationActive={false}/>
             {showProjection && equityRange === 'ALL' && (
               <Line type="monotone" dataKey="projection" stroke={C.purple} strokeWidth={1.5} strokeDasharray="4 4" dot={false} connectNulls={false} isAnimationActive={false}/>
             )}
@@ -4521,7 +4539,7 @@ export default function TradingApp() {
       {/* PAGER — scrollabile solo nel content, non nella pagina */}
       <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none', paddingBottom:'env(safe-area-inset-bottom, 0px)' }}>
         <div className="max-w-7xl mx-auto px-5 py-4"
-          style={{ paddingBottom: 0 }}>
+          style={{ paddingBottom: 70 }}>
           {TAB_ORDER[tabIdx] === 'daily'    && <ErrorBoundary C={C}><DailyView    C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
           {TAB_ORDER[tabIdx] === 'temporal' && <ErrorBoundary C={C}><TemporalView C={C} trades={trades} equity={equity}/></ErrorBoundary>}
           {TAB_ORDER[tabIdx] === 'stats'    && <ErrorBoundary C={C}><StatsView    C={C} trades={trades}/></ErrorBoundary>}
