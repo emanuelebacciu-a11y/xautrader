@@ -601,6 +601,7 @@ const useLiveClock = () => {
   return now;
 };
 
+/* DEPLOY: 1778927090 */
 /* ============= SUPABASE LAYER =============
    Legge i trade reali dalla tabella `trades` su Supabase.
    Polling ogni 30s, cache localStorage `xt_sb_cache`.
