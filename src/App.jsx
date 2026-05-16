@@ -4396,27 +4396,54 @@ const aggBars = (bars, n) => {
   return out;
 };
 
-// Fetch OHLC da Yahoo Finance via allorigins proxy (no CORS)
+// Fetch OHLC da Yahoo Finance con fallback su più proxy
 const fetchYahooOHLC = async (tf) => {
   const { interval, range, aggN } = TF_YF[tf];
   const symbol = 'XAUUSD%3DX';
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}&includePrePost=false`;
-  const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-  const res = await fetch(proxy);
-  const json = await res.json();
-  const data = JSON.parse(json.contents);
-  const result = data?.chart?.result?.[0];
-  if (!result) throw new Error('No data');
-  const ts = result.timestamp;
-  const q  = result.indicators.quote[0];
-  let bars = ts.map((t, i) => ({
-    time:  t,
-    open:  q.open[i],
-    high:  q.high[i],
-    low:   q.low[i],
-    close: q.close[i],
-  })).filter(b => b.open && b.high && b.low && b.close);
-  return aggBars(bars, aggN);
+  const yfUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${range}&includePrePost=false`;
+
+  // Lista proxy in ordine di preferenza
+  const proxies = [
+    async () => {
+      const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(yfUrl)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    async () => {
+      const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(yfUrl)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      return JSON.parse(json.contents);
+    },
+    async () => {
+      const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(yfUrl)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+  ];
+
+  let lastErr;
+  for (const tryProxy of proxies) {
+    try {
+      const data = await tryProxy();
+      const result = data?.chart?.result?.[0];
+      if (!result) throw new Error('No data');
+      const ts = result.timestamp;
+      const q  = result.indicators.quote[0];
+      const bars = ts.map((t, i) => ({
+        time:  t,
+        open:  q.open[i],
+        high:  q.high[i],
+        low:   q.low[i],
+        close: q.close[i],
+      })).filter(b => b.open && b.high && b.low && b.close);
+      if (!bars.length) throw new Error('Empty bars');
+      return aggBars(bars, aggN);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('Tutti i proxy falliti');
 };
 
 // Converte prezzo → pixel Y dentro il chart (area canvas)
