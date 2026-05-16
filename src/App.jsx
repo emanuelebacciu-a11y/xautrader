@@ -4445,7 +4445,10 @@ export default function TradingApp() {
 
       position: 'fixed',
       top: 0, left: 0, right: 0,
+      // --app-height viene aggiornato da main.jsx + useEffect qui sotto.
+      // minHeight: 100dvh è il safety net se il JS non ha ancora girato.
       height: 'var(--app-height, 100dvh)',
+      minHeight: '100dvh',
 
       display: 'flex', flexDirection: 'column',
     }}>
@@ -4543,7 +4546,7 @@ export default function TradingApp() {
       </header>
 
       {/* PAGER — scrollabile solo nel content, non nella pagina */}
-      <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none' }}>
+      <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none', paddingBottom:'env(safe-area-inset-bottom, 0px)' }}>
         <div className="max-w-7xl mx-auto px-5 py-4"
           style={{ paddingBottom: 0 }}>
           {TAB_ORDER[tabIdx] === 'daily'    && <ErrorBoundary C={C}><DailyView    C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
