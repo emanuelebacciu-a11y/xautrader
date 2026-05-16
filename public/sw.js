@@ -1,4 +1,4 @@
-const CACHE_NAME = 'journal-v1.3';
+const CACHE_NAME = 'journal-v1.4';
 const STATIC_ASSETS = ['/', '/index.html', '/manifest.json'];
 
 // Install — pre-cache shell
@@ -19,7 +19,7 @@ self.addEventListener('activate', event => {
   self.clients.claim();
 });
 
-// Fetch — network-first per JS/CSS, cache-first per assets statici
+// Fetch — network-first sempre, cache solo come fallback offline
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
@@ -28,19 +28,14 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      const network = fetch(event.request).then(response => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
-        return response;
-      }).catch(() => cached || caches.match('/index.html'));
-
-      // Shell HTML → cache-first per avvio offline istantaneo
-      if (event.request.mode === 'navigate') return cached || network;
-
-      return network;
-    })
+    fetch(event.request).then(response => {
+      if (response.ok) {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+      }
+      return response;
+    }).catch(() =>
+      caches.match(event.request).then(cached => cached || caches.match('/index.html'))
+    )
   );
 });
