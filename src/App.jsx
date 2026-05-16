@@ -4404,10 +4404,11 @@ export default function TradingApp() {
     <div className="relative" style={{
       background: C.bg, color: C.primary, fontFamily: FONT.text,
       WebkitFontSmoothing: 'antialiased', MozOsxFontSmoothing: 'grayscale',
-      
-      position: 'fixed', inset: 0,
-      paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-      
+
+      position: 'fixed',
+      top: 0, left: 0, right: 0,
+      height: 'calc(var(--vh, 1vh) * 100)',
+
       display: 'flex', flexDirection: 'column',
     }}>
       <div className="fixed inset-0 pointer-events-none" style={{ background: C.ambient }}/>
