@@ -620,8 +620,12 @@ const _n = v => {
 const _d = v => {
   if (!v) return '';
   const s = String(v).trim();
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[1]}-${m[2]}-${m[3]}` : s;
+  // Supporta: '2026-05-15', '2026-05-15T00:00:00', '2026-05-15 10:30:00', '15/05/2026'
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const eu = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (eu) return `${eu[3]}-${eu[2]}-${eu[1]}`;
+  return s.slice(0, 10); // fallback: prendi i primi 10 char
 };
 
 // Mappa riga Supabase → oggetto trade compatibile con l'app
@@ -3005,8 +3009,23 @@ const TemporalView = ({ C, trades, equity }) => {
   const allTrades = trades || [];
   const equityCurve = equity && equity.length > 0 ? equity : [{day:'Dep.',value:10000}];
   const today = new Date();
-  const [calYear,  setCalYear]  = useState(2026);
+
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
+  const [calYear,  setCalYear]  = useState(new Date().getFullYear());
+  const [calInit,  setCalInit]  = useState(false);
+  // Vai al mese dell'ultimo trade quando i dati arrivano
+  useEffect(() => {
+    if (calInit || !trades || trades.length === 0) return;
+    const closed = trades.filter(t => !t.open && t.date && t.date.length >= 10);
+    if (closed.length === 0) return;
+    const last = closed.reduce((a,b) => a.date > b.date ? a : b);
+    const d = new Date(last.date + 'T12:00:00');
+    if (!isNaN(d)) {
+      setCalYear(d.getFullYear());
+      setCalMonth(d.getMonth());
+      setCalInit(true);
+    }
+  }, [trades, calInit]);
 
   const tradesByDate = useMemo(() => allTrades.reduce((acc,t) => { if(!acc[t.date])acc[t.date]=[]; acc[t.date].push(t); return acc; }, {}), [allTrades]);
   const calData = useMemo(() => buildCalData(calYear, calMonth, tradesByDate), [calYear, calMonth, tradesByDate]);
@@ -3717,6 +3736,45 @@ const computeConfidenceBreakdown = (trades, confidence) => {
   }).filter(r=>r.trades>0);
 };
 
+
+/* ============= ERROR BOUNDARY ============= */
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  componentDidCatch(e, info) { console.error('[Journal]', e, info); }
+  render() {
+    if (this.state.error) {
+      const C = this.props.C || { bg:'#000', primary:'#fff', secondary:'#888',
+        tertiary:'#555', glass2:'#1c1c1e', sep:'#2c2c2e', green:'#39FF14',
+        red:'#FF073A', cyan:'#7DF9FF' };
+      return (
+        <div style={{
+          padding:'32px 20px', textAlign:'center',
+          background: C.glass2, borderRadius:20, margin:16,
+          border: `1px solid ${C.sep}`,
+        }}>
+          <div style={{fontSize:32, marginBottom:12}}>⚠️</div>
+          <div style={{color:C.primary, fontSize:16, fontWeight:600, marginBottom:8}}>
+            Errore di rendering
+          </div>
+          <div style={{color:C.secondary, fontSize:12, fontFamily:'monospace',
+            background:'rgba(255,7,58,0.08)', padding:'12px', borderRadius:10,
+            textAlign:'left', wordBreak:'break-all', marginBottom:16,
+          }}>
+            {this.state.error?.message || 'Errore sconosciuto'}
+          </div>
+          <button onClick={()=>this.setState({error:null})}
+            style={{padding:'8px 20px', background:C.green, color:'#000',
+              border:'none', borderRadius:20, cursor:'pointer', fontWeight:600}}>
+            Riprova
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ============= STATS ROOT ============= */
 const StatsView = ({ C, trades }) => {
   const [confluences] = usePersistedState('xt_confluences', {});
@@ -3742,9 +3800,9 @@ const StatsView = ({ C, trades }) => {
         <SegmentedControl C={C} options={subOptions} value={subMapRev[subTab] || 'Metriche'} onChange={handleSubTab}/>
       </div>
 
-      {subTab === 'metrics'   && <MetricsView   C={C} stats={stats}/>}
-      {subTab === 'breakdown' && <BreakdownView C={C} trades={trades} stats={stats} confluences={confluences} confidence={confidence} confBreakdown={confBreakdown} confCorr={confCorr}/>}
-      {subTab === 'analytics' && <AnalyticsView C={C} trades={trades}/>}
+      {subTab === 'metrics'   && <ErrorBoundary C={C}><MetricsView   C={C} stats={stats}/></ErrorBoundary>}
+      {subTab === 'breakdown' && <ErrorBoundary C={C}><BreakdownView C={C} trades={trades} stats={stats} confluences={confluences} confidence={confidence} confBreakdown={confBreakdown} confCorr={confCorr}/></ErrorBoundary>}
+      {subTab === 'analytics' && <ErrorBoundary C={C}><AnalyticsView C={C} trades={trades}/></ErrorBoundary>}
     </div>
   );
 };
@@ -4195,7 +4253,7 @@ export default function TradingApp() {
                 background: sbError ? C.red : sbLoading ? C.yellow : C.green,
               }}/>
               <span style={{color:C.secondary,fontSize:11,fontFamily:FONT.text,fontWeight:500}}>
-                {sbError ? 'Offline' : sbLoading ? 'Sync…' : fromLocal ? 'Cache' : 'Live'}
+                {sbError ? 'Offline' : sbLoading ? 'Sync…' : fromLocal ? `Cache·${trades.length}t` : `Live·${trades.length}t`}
               </span>
               {!sbLoading && (
                 <button onClick={()=>{haptic.selection();refetch();}} style={{
@@ -4239,9 +4297,9 @@ export default function TradingApp() {
       <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none' }}>
         <div className="max-w-7xl mx-auto px-5 py-4"
           style={{ paddingBottom:'calc(env(safe-area-inset-bottom, 0px) + 96px)' }}>
-          {TAB_ORDER[tabIdx] === 'daily'    && <DailyView    C={C} now={now} settings={settings} trades={trades} equity={equity}/>}
-          {TAB_ORDER[tabIdx] === 'temporal' && <TemporalView C={C} trades={trades} equity={equity}/>}
-          {TAB_ORDER[tabIdx] === 'stats'    && <StatsView    C={C} trades={trades}/>}
+          {TAB_ORDER[tabIdx] === 'daily'    && <ErrorBoundary C={C}><DailyView    C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
+          {TAB_ORDER[tabIdx] === 'temporal' && <ErrorBoundary C={C}><TemporalView C={C} trades={trades} equity={equity}/></ErrorBoundary>}
+          {TAB_ORDER[tabIdx] === 'stats'    && <ErrorBoundary C={C}><StatsView    C={C} trades={trades}/></ErrorBoundary>}
         </div>
       </div>
 
