@@ -3839,31 +3839,59 @@ const StatsView = ({ C, trades }) => {
 // 365 giorni per heatmap: gen-mag 2026 (143 giorni) + mock precedente
 /* ============= ANNUAL HEATMAP ============= */
 const AnnualHeatmap = ({ C, data }) => {
-  const all    = data || [];
-  const maxV   = (() => { const vals = all.map(d=>Math.abs(d.pnl||0)).filter(v=>v>0); return vals.length ? Math.max(...vals) : 1; })();
-  const weeks  = all.length ? Math.max(...all.map(d=>d.week)) + 1 : 53;
-  const months = ['Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic','Gen','Feb','Mar','Apr','Mag'];
-  const [tooltip, setTooltip] = useState(null); // {date, pnl, x, y}
+  const all = data || [];
+  const [tooltip, setTooltip] = useState(null);
 
-  const cellColor = (pnl) => {
-    if (pnl === 0) return C.glass2;
-    const i = Math.min(Math.abs(pnl) / maxV, 1);
-    const hex = Math.round(i * 80).toString(16).padStart(2,'0');
-    return pnl > 0 ? `${C.green}${hex}` : `${C.red}${hex}`;
+  // Costanti layout
+  const CELL = 11, GAP = 2, LABEL_W = 18;
+
+  const maxV = (() => {
+    const vals = all.map(d => Math.abs(d.pnl || 0)).filter(v => v > 0);
+    return vals.length ? Math.max(...vals) : 1;
+  })();
+
+  const totalWeeks = all.length
+    ? all.reduce((m, d) => Math.max(m, d.week), 0) + 1
+    : 53;
+
+  const gridW = totalWeeks * (CELL + GAP);
+
+  // Mesi: primo giorno di ogni mese → settimana in cui appare
+  const monthLabels = (() => {
+    const MONTHS_IT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
+    const seen = {};
+    all.forEach(c => {
+      const key = `${c.year}-${c.month}`;
+      if (c.dom === 1 && seen[key] === undefined) seen[key] = { label: MONTHS_IT[c.month], week: c.week };
+    });
+    return Object.values(seen).sort((a, b) => a.week - b.week);
+  })();
+
+  const year = new Date().getFullYear();
+
+  const cellColor = pnl => {
+    if (!pnl || pnl === 0) return C.glass2;
+    const intensity = Math.min(Math.abs(pnl) / maxV, 1);
+    const alpha = Math.round(40 + intensity * 200).toString(16).padStart(2, '0');
+    return pnl > 0 ? `${C.green}${alpha}` : `${C.red}${alpha}`;
   };
 
   return (
     <Glass C={C}>
-      <SectionHeader C={C} action={<span style={{color:C.secondary,fontSize:11,fontFamily:FONT.mono}}>Mag 2025 — Mag 2026</span>}>
+      <SectionHeader C={C} action={
+        <span style={{color:C.secondary,fontSize:10,fontFamily:FONT.mono}}>Gen {year} — oggi</span>
+      }>
         Heatmap Annuale
       </SectionHeader>
-      <div style={{overflowX:'auto', position:'relative'}} onClick={()=>setTooltip(null)}>
+      <div style={{overflowX:'auto', position:'relative'}} onClick={() => setTooltip(null)}>
         {tooltip && (
           <div style={{
             position:'fixed',
-            top: tooltip.vy - 48, left: Math.max(8, Math.min(tooltip.vx - 40, window.innerWidth - 140)),
-            background: C.glass2, border:`0.5px solid ${(tooltip.pnl||0)>=0?C.green:C.red}66`,
-            borderRadius: RADIUS.inset, padding:'6px 10px', zIndex:100,
+            top: Math.max(8, tooltip.vy - 56),
+            left: Math.max(8, Math.min(tooltip.vx - 50, (typeof window!=='undefined'?window.innerWidth:400) - 150)),
+            background: C.glass2,
+            border: `0.5px solid ${(tooltip.pnl||0) >= 0 ? C.green : C.red}66`,
+            borderRadius: RADIUS.inset, padding:'6px 10px', zIndex:200,
             backdropFilter:'blur(16px)', WebkitBackdropFilter:'blur(16px)',
             pointerEvents:'none', whiteSpace:'nowrap',
           }}>
@@ -3873,51 +3901,51 @@ const AnnualHeatmap = ({ C, data }) => {
             </div>
           </div>
         )}
-        <div style={{minWidth: LABEL_W + gridW, paddingBottom: 4}}>
-          {/* Mesi dinamici */}
-          <div style={{display:'flex', marginBottom:3, marginLeft: LABEL_W}}>
+        <div style={{minWidth: LABEL_W + gridW + 8, paddingBottom:4}}>
+          {/* Etichette mesi — posizionate assolutamente */}
+          <div style={{position:'relative', height:14, marginLeft: LABEL_W}}>
             {monthLabels.map(({label, week}, i) => (
               <div key={i} style={{
                 position:'absolute',
-                left: LABEL_W + week * (CELL+GAP),
-                fontSize:9, fontFamily:FONT.mono, color:C.tertiary, fontWeight:600,
+                left: week * (CELL + GAP),
+                top:0, fontSize:9, fontFamily:FONT.mono, color:C.tertiary, fontWeight:600,
               }}>{label}</div>
             ))}
-            <div style={{height:12}}/>
           </div>
-          <div style={{display:'flex', gap:0, marginTop:14}}>
-            {/* Day labels L M M G V S D */}
-            <div style={{display:'flex', flexDirection:'column', gap:GAP, width:LABEL_W, marginRight:2, paddingTop:0}}>
-              {['L','','M','','G','','D'].map((d,i)=>(
+          {/* Griglia */}
+          <div style={{display:'flex', gap:0, marginTop:2}}>
+            {/* L M M G V S D */}
+            <div style={{display:'flex', flexDirection:'column', gap:GAP, width:LABEL_W, flexShrink:0}}>
+              {['L','','M','','G','','D'].map((d,i) => (
                 <div key={i} style={{height:CELL, fontSize:7, fontFamily:FONT.mono,
                   color:C.tertiary, display:'flex', alignItems:'center', lineHeight:1}}>
                   {d}
                 </div>
               ))}
             </div>
-            {/* Grid: colonne = settimane, righe = giorni (0=Lun…6=Dom) */}
+            {/* Celle */}
             <div style={{display:'flex', gap:GAP}}>
-              {Array.from({length:totalWeeks},(_,w)=>(
+              {Array.from({length: totalWeeks}, (_, w) => (
                 <div key={w} style={{display:'flex', flexDirection:'column', gap:GAP}}>
-                  {[0,1,2,3,4,5,6].map(dow=>{
-                    const cell = all.find(c=>c.week===w && c.day===dow);
+                  {[0,1,2,3,4,5,6].map(dow => {
+                    const cell = all.find(c => c.week === w && c.day === dow);
                     const hasTrade = cell && cell.pnl !== 0;
                     return (
                       <div key={dow}
-                        onClick={e=>{
+                        onClick={e => {
                           e.stopPropagation();
                           if (!hasTrade) return;
                           const r = e.currentTarget.getBoundingClientRect();
-                          setTooltip(t=>t?.date===cell.date?null:{
-                            date:cell.date, pnl:cell.pnl, vx:r.left, vy:r.top });
+                          setTooltip(t => t?.date === cell.date ? null
+                            : { date: cell.date, pnl: cell.pnl, vx: r.left + CELL/2, vy: r.top });
                         }}
                         style={{
-                          width:CELL, height:CELL, borderRadius:2,
+                          width: CELL, height: CELL, borderRadius: 2,
                           background: cell ? cellColor(cell.pnl) : 'transparent',
-                          border: cell ? `0.5px solid ${hasTrade?'transparent':C.sep+'44'}` : 'none',
+                          border: (cell && !hasTrade) ? `0.5px solid ${C.sep}44` : 'none',
                           cursor: hasTrade ? 'pointer' : 'default',
-                          transition:'transform 0.1s',
-                          transform: tooltip?.date===cell?.date ? 'scale(1.7)' : 'scale(1)',
+                          transition: 'transform 0.1s',
+                          transform: tooltip?.date === cell?.date ? 'scale(1.8)' : 'scale(1)',
                         }}
                       />
                     );
@@ -3926,13 +3954,18 @@ const AnnualHeatmap = ({ C, data }) => {
               ))}
             </div>
           </div>
-          {/* Legend */}
-          <div className="flex items-center gap-2 mt-3" style={{justifyContent:'flex-end'}}>
-            <span style={{color:C.tertiary,fontSize:9,fontFamily:FONT.mono}}>Meno</span>
-            {[0.15,0.35,0.55,0.75,1.0].map((i,k)=>(
-              <div key={k} style={{width:10,height:10,borderRadius:2.5,background:`${C.green}${Math.round(i*80).toString(16).padStart(2,'0')}`}}/>
+          {/* Legenda */}
+          <div style={{display:'flex', alignItems:'center', gap:8, marginTop:8, marginLeft:LABEL_W}}>
+            <span style={{color:C.tertiary, fontSize:9, fontFamily:FONT.mono}}>meno</span>
+            {[0.15,0.35,0.6,0.85,1].map((i,idx) => (
+              <div key={idx} style={{width:CELL, height:CELL, borderRadius:2,
+                background:`${C.green}${Math.round(i*200+40).toString(16).padStart(2,'0')}`}}/>
             ))}
-            <span style={{color:C.tertiary,fontSize:9,fontFamily:FONT.mono}}>Più</span>
+            <span style={{color:C.tertiary, fontSize:9, fontFamily:FONT.mono}}>più</span>
+            <div style={{marginLeft:8, display:'flex', gap:4}}>
+              <div style={{width:CELL, height:CELL, borderRadius:2, background:`${C.red}99`}}/>
+              <span style={{color:C.tertiary, fontSize:9, fontFamily:FONT.mono}}>perdita</span>
+            </div>
           </div>
         </div>
       </div>
