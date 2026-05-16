@@ -4444,12 +4444,12 @@ export default function TradingApp() {
 
       {/* HEADER */}
       <header className="sticky z-30 overflow-hidden" style={{
-        top: -20,
+        top: -8,
         background: scheme === 'dark' ? 'rgba(0,0,0,0.48)' : 'rgba(255,255,255,0.58)',
         backdropFilter: 'saturate(200%) blur(32px)',
         WebkitBackdropFilter: 'saturate(200%) blur(32px)',
         borderBottom: `0.5px solid ${C.sep}`,
-        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 20px)',
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 8px)',
       }}>
         <div className="absolute inset-0 xt-shimmer-overlay" style={{opacity: scheme==='dark'?1:0.4}}/>
         <div className="max-w-7xl mx-auto px-4 py-1 flex items-center justify-between relative">
@@ -4539,7 +4539,7 @@ export default function TradingApp() {
       {/* BOTTOM TAB BAR */}
       <div className="fixed left-1/2 z-50" style={{
         transform: 'translateX(-50%)',
-        bottom: -20,
+        bottom: -8,
       }}>
         <div style={{
           background: C.glassBar,
