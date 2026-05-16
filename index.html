@@ -3,34 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <!-- PWA / iOS -->
     <meta name="theme-color" content="#000000" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Journal" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <!-- iOS splash screens 15 Pro Max (430×932) -->
     <link rel="apple-touch-startup-image" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)" href="/splash-430-932.png"/>
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Journal</title>
     <style>
-      /* Prevent bounce scroll, full OLED black */
-      * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
-      html { background: #000; height: 100%; overflow: hidden; }
-      body {
-        margin: 0; padding: 0; background: #000;
-        height: 100dvh; height: -webkit-fill-available;
-        overscroll-behavior: none; overflow: hidden;
-        -webkit-overflow-scrolling: touch;
-        /* Prevent iOS text size adjustment */
-        -webkit-text-size-adjust: 100%;
-      }
-      #root {
-        height: 100dvh; height: -webkit-fill-available;
-        overflow: hidden; position: relative;
-      }
+      html { background: #000; }
+      body { margin: 0; padding: 0; background: #000; }
     </style>
   </head>
   <body>
