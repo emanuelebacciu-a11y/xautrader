@@ -896,7 +896,7 @@ const computeAllStats = (trades) => {
   const breakSess = ['ASIAN','FRANKFURT','LONDON','NEWYORK'].map(s => {
     const t = closed.filter(tr=>(tr.session||'').toUpperCase()===s);
     const w = t.filter(tr=>tr.pnl>0).length;
-    const p = t.reduce((acc,tr)=>acc+tr.pnl,0);
+    const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
     const r = t.filter(tr=>tr.rr>0).map(tr=>tr.rr);
     return { name:s==='NEWYORK'?'New York':s.charAt(0)+s.slice(1).toLowerCase(), trades:t.length, wr:t.length?Math.round(w/t.length*100):0, pnl:p, avg:t.length?p/t.length:0, rr:r.length?r.reduce((a,b)=>a+b,0)/r.length:0, color:SESS_COLORS[s] };
   }).filter(s=>s.trades>0);
@@ -904,7 +904,7 @@ const computeAllStats = (trades) => {
   const breakDay = ['Lun','Mar','Mer','Gio','Ven','Sab','Dom'].map((name,i) => {
     const t = closed.filter(tr=>(new Date(tr.date).getDay()+6)%7===i);
     const w = t.filter(tr=>tr.pnl>0).length;
-    const p = t.reduce((acc,tr)=>acc+tr.pnl,0);
+    const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
     const r = t.filter(tr=>tr.rr>0).map(tr=>tr.rr);
     return { name, trades:t.length, wr:t.length?Math.round(w/t.length*100):0, pnl:p, avg:t.length?p/t.length:0, rr:r.length?r.reduce((a,b)=>a+b,0)/r.length:0 };
   });
@@ -913,14 +913,14 @@ const computeAllStats = (trades) => {
   const breakMonth = MONTH_NAMES.map((name,i) => {
     const t = closed.filter(tr=>new Date(tr.date).getMonth()===i);
     const w = t.filter(tr=>tr.pnl>0).length;
-    const p = t.reduce((acc,tr)=>acc+tr.pnl,0);
+    const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
     return { name, trades:t.length, wr:t.length?Math.round(w/t.length*100):0, pnl:p, avg:t.length?p/t.length:0 };
   }).filter(m=>m.trades>0);
 
   const breakType = ['Scalp','Intraday','Swing','Position'].map(name => {
     const t = closed.filter(tr=>(tr.tradeType||'').toLowerCase()===name.toLowerCase());
     const w = t.filter(tr=>tr.pnl>0).length;
-    const p = t.reduce((acc,tr)=>acc+tr.pnl,0);
+    const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
     return { name, trades:t.length, wr:t.length?Math.round(w/t.length*100):0, pnl:p, avg:t.length?p/t.length:0 };
   }).filter(s=>s.trades>0);
 
@@ -931,7 +931,7 @@ const computeAllStats = (trades) => {
       return ((utcH+2)%24)===h; // AMS DST semplificato
     });
     const w = t.filter(tr=>tr.pnl>0).length;
-    const p = t.reduce((acc,tr)=>acc+tr.pnl,0);
+    const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
     return { name:`${String(h).padStart(2,'0')}:00`, trades:t.length, wr:t.length?Math.round(w/t.length*100):0, pnl:p, avg:t.length?p/t.length:0 };
   }).filter(h=>h.trades>0);
 
@@ -939,7 +939,7 @@ const computeAllStats = (trades) => {
   const breakHolding = HOLD_BUCKETS.map(b => {
     const t = closed.filter(tr=>tr.duration>=b.min&&tr.duration<b.max);
     const w = t.filter(tr=>tr.pnl>0).length;
-    const p = t.reduce((acc,tr)=>acc+tr.pnl,0);
+    const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
     return { name:b.name, trades:t.length, wr:t.length?Math.round(w/t.length*100):0, pnl:p, avg:t.length?p/t.length:0 };
   }).filter(b=>b.trades>0);
 
@@ -950,7 +950,7 @@ const computeAllStats = (trades) => {
     SESS.map(s => {
       const t = closed.filter(tr=>(new Date(tr.date).getDay()+6)%7===di && (tr.session||'').toUpperCase()===s);
       const w = t.filter(tr=>tr.pnl>0).length;
-      const p = t.reduce((acc,tr)=>acc+tr.pnl,0);
+      const p = t.reduce((acc,tr)=>acc+(tr.pnl||0),0);
       const r = t.filter(tr=>tr.rr>0).map(tr=>tr.rr);
       return { pnl:p, wr:t.length?Math.round(w/t.length*100):0, rr:r.length?r.reduce((a,b)=>a+b,0)/r.length:0, trades:t.length };
     })
@@ -961,9 +961,9 @@ const computeAllStats = (trades) => {
     const slice = sorted.slice(-k);
     if (slice.length < 3) return { period:`${k}T`, sharpe:0, pf:0, wr:0 };
     const sw = slice.filter(t=>t.pnl>0).length;
-    const sgw = slice.filter(t=>t.pnl>0).reduce((s,t)=>s+t.pnl,0);
-    const sgl = Math.abs(slice.filter(t=>t.pnl<0).reduce((s,t)=>s+t.pnl,0));
-    const sm = slice.reduce((s,t)=>s+t.pnl,0)/Math.max(slice.length,1);
+    const sgw = slice.filter(t=>t.pnl>0).reduce((s,t)=>s+(t.pnl||0),0);
+    const sgl = Math.abs(slice.filter(t=>t.pnl<0).reduce((s,t)=>s+(t.pnl||0),0));
+    const sm = slice.reduce((s,t)=>s+(t.pnl||0),0)/Math.max(slice.length,1);
     const sv = slice.reduce((s,t)=>s+(t.pnl-sm)**2,0)/Math.max(slice.length,1);
     const ss = Math.sqrt(sv);
     return { period:`${k}T`, sharpe:ss>0?sm/ss:0, pf:sgl>0?sgw/sgl:0, wr:slice.length?Math.round(sw/slice.length*100):0 };
@@ -990,7 +990,7 @@ const computeAllStats = (trades) => {
     {name:'Dopo 2L+',arr:buckets.after2Lplus},
   ].map(b => {
     const bw=b.arr.filter(t=>t.pnl>0).length;
-    const bp=b.arr.reduce((s,t)=>s+t.pnl,0);
+    const bp=b.arr.reduce((s,t)=>s+(t.pnl||0),0);
     return {name:b.name,trades:b.arr.length,wr:b.arr.length?Math.round(bw/b.arr.length*100):0,pnl:bp,avg:b.arr.length?bp/b.arr.length:0};
   });
 
@@ -1986,7 +1986,7 @@ const detectCooldown = (trades) => {
 
 // Daily target check
 const checkDailyTarget = (todayTrades, target) => {
-  const pnl = todayTrades.reduce((s,t)=>s+t.pnl, 0);
+  const pnl = todayTrades.reduce((s,t)=>s+(t.pnl||0), 0);
   return { reached: pnl >= target && target > 0, pnl };
 };
 
@@ -2205,13 +2205,13 @@ const DailyView = ({ C, now, settings, trades, equity }) => {
   const allTrades = trades || [];
   const equityCurve = equity && equity.length > 0 ? equity : [{day:'Dep.',value:10000}];
   const today = useMemo(() => { const d = new Date().toISOString().slice(0,10); return allTrades.filter(t=>t.date===d); }, [allTrades]);
-  const dayPnL = useMemo(() => today.reduce((s,t)=>s+t.pnl,0), [today]);
+  const dayPnL = useMemo(() => today.reduce((s,t)=>s+(t.pnl||0),0), [today]);
   const dayWR  = today.length ? Math.round(today.filter(t=>t.pnl>0).length/today.length*100) : 0;
   const BALANCE_INIT = equityCurve[0]?.value || 10000;
   const BALANCE_NOW = equityCurve[equityCurve.length-1]?.value || BALANCE_INIT;
   const dayPnLPct = BALANCE_NOW > 0 ? (dayPnL / BALANCE_NOW * 100) : 0;
   // Weekly P&L: somma ultimi 5 giorni trading dal mock
-  const weeklyPnL = useMemo(() => { const now = new Date(); const mon = new Date(now); mon.setDate(now.getDate()-((now.getDay()+6)%7)); const monStr = mon.toISOString().slice(0,10); return allTrades.filter(t=>t.date>=monStr).reduce((s,t)=>s+t.pnl,0); }, [allTrades]);
+  const weeklyPnL = useMemo(() => { const now = new Date(); const mon = new Date(now); mon.setDate(now.getDate()-((now.getDay()+6)%7)); const monStr = mon.toISOString().slice(0,10); return allTrades.filter(t=>t.date>=monStr).reduce((s,t)=>s+(t.pnl||0),0); }, [allTrades]);
   const weeklyPnLPct = BALANCE_NOW > 0 ? (weeklyPnL / BALANCE_NOW * 100) : 0;
   // Consecutive losses: trade più recenti con pnl < 0
   const consecLoss = useMemo(() => {
@@ -2372,7 +2372,7 @@ const DailyView = ({ C, now, settings, trades, equity }) => {
             const closed = filtered.filter(t=>!t.open);
             const wins   = closed.filter(t=>t.pnl>0);
             const qs_wr  = closed.length ? Math.round(wins.length/closed.length*100) : 0;
-            const qs_pnl = filtered.reduce((s,t)=>s+t.pnl,0);
+            const qs_pnl = filtered.reduce((s,t)=>s+(t.pnl||0),0);
             const rrArr  = closed.filter(t=>t.rr>0);
             const qs_rr  = rrArr.length ? rrArr.reduce((s,t)=>s+t.rr,0)/rrArr.length : 0;
             const qs_exp = closed.length ? qs_pnl/closed.length : 0;
@@ -2453,7 +2453,7 @@ const DailyView = ({ C, now, settings, trades, equity }) => {
                       )}
                       <div className="text-right">
                         <div style={{color:t.open?C.orange:t.pnl>=0?C.green:C.red,fontSize:14,fontFamily:FONT.mono,fontWeight:600,fontVariantNumeric:'tabular-nums'}}>
-                          {t.pnl>=0?'+':''}${t.pnl.toFixed(2)}
+                          {(t.pnl??0)>=0?'+':''}${(+(t.pnl??0)).toFixed(2)}
                         </div>
                         <div style={{color:t.open?C.orange:t.pnl>=0?C.green:C.red,fontSize:10,fontFamily:FONT.mono,fontWeight:500,opacity:0.75,fontVariantNumeric:'tabular-nums'}}>
                           {pnlPct>=0?'+':''}{pnlPct.toFixed(2)}%
@@ -2467,7 +2467,7 @@ const DailyView = ({ C, now, settings, trades, equity }) => {
                     <div className="pb-3 px-2.5 -mx-2.5 space-y-3">
                       <div className="grid grid-cols-4 gap-2 mt-2 mb-1">
                         {[
-                          {l:'Entry', v:t.entry.toFixed(2)},
+                          {l:'Entry', v:t.entry!=null?t.entry.toFixed(2):'—'},
                           {l: t.open ? 'Live' : 'Exit',
                            v: t.open ? (t.currentPrice?.toFixed(2) ?? '—') : (t.exit?.toFixed(2) ?? '—')},
                           {l:'Size',  v:t.size.toFixed(2)},
@@ -2520,10 +2520,10 @@ const DailyView = ({ C, now, settings, trades, equity }) => {
                               <div key={i} className="flex items-center justify-between" style={{padding:'6px 0',borderBottom:`0.5px solid ${C.sep}`}}>
                                 <div className="flex items-center gap-2.5">
                                   <span style={{color:C.cyan,fontSize:10,fontFamily:FONT.mono,fontWeight:600,fontVariantNumeric:'tabular-nums',minWidth:38}}>{p.time}</span>
-                                  <span style={{color:C.secondary,fontSize:11,fontFamily:FONT.mono,fontVariantNumeric:'tabular-nums'}}>{p.size.toFixed(2)} @ {p.exit.toFixed(2)}</span>
+                                  <span style={{color:C.secondary,fontSize:11,fontFamily:FONT.mono,fontVariantNumeric:'tabular-nums'}}>{p.size!=null?(+p.size).toFixed(2):'—'} @ {p.exit!=null?(+p.exit).toFixed(2):'—'}</span>
                                 </div>
                                 <span style={{color:p.pnl>=0?C.green:C.red,fontSize:11,fontFamily:FONT.mono,fontWeight:600,fontVariantNumeric:'tabular-nums'}}>
-                                  {p.pnl>=0?'+':''}${p.pnl.toFixed(2)}
+                                  {(p.pnl??0)>=0?'+':''}${(+(p.pnl??0)).toFixed(2)}
                                 </span>
                               </div>
                             ))}
@@ -2639,7 +2639,7 @@ const DailyView = ({ C, now, settings, trades, equity }) => {
         const totSlip   = closed.reduce((s,t)=>s+(t.slippage||0),0);
         const totCost   = totSpread+totComm+totSwap+totSlip;
         const cpTrade   = closed.length ? totCost/closed.length : 0;
-        const pnlTot    = closed.reduce((s,t)=>s+t.pnl,0);
+        const pnlTot    = closed.reduce((s,t)=>s+(t.pnl||0),0);
         const costPct   = pnlTot !== 0 ? Math.abs(totCost/pnlTot)*100 : 0;
         if (closed.length === 0) return null;
         return (
@@ -2885,7 +2885,7 @@ const buildCalData = (year, month, tradesByDate = {}) => {
     const dayTrades = tradesByDate[dateKey] || [];
     const closedTrades = dayTrades.filter(t=>!t.open);
     const pnl = dayTrades.length > 0
-      ? closedTrades.reduce((s,t)=>s+t.pnl, 0)
+      ? closedTrades.reduce((s,t)=>s+(t.pnl||0), 0)
       : 0;
     const openTrades = dayTrades.filter(t=>t.open);
     return {
@@ -2949,7 +2949,7 @@ const DayTradePill = ({ C, t, balance = 10510 }) => {
             fontSize: 13, fontFamily: FONT.mono, fontWeight: 700,
             fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.2px',
           }}>
-            {t.pnl >= 0 ? '+' : ''}${t.pnl.toFixed(2)}
+            {(t.pnl??0) >= 0 ? '+' : ''}${(+(t.pnl??0)).toFixed(2)}
           </div>
           <div style={{
             color: t.pnl >= 0 ? C.green : C.red,
@@ -2964,7 +2964,7 @@ const DayTradePill = ({ C, t, balance = 10510 }) => {
       {/* Second row: entry / exit (or current) / size / R:R / grade */}
       <div className="flex items-center gap-3 mt-1.5 flex-wrap">
         <span style={{color:C.tertiary,fontSize:10,fontFamily:FONT.mono}}>
-          E: <span style={{color:C.secondary}}>{t.entry.toFixed(1)}</span>
+          E: <span style={{color:C.secondary}}>{t.entry!=null?t.entry.toFixed(1):'—'}</span>
         </span>
         {isOpen ? (
           <span style={{color:C.tertiary,fontSize:10,fontFamily:FONT.mono}}>
@@ -3006,7 +3006,7 @@ const TemporalView = ({ C, trades, equity }) => {
   const equityCurve = equity && equity.length > 0 ? equity : [{day:'Dep.',value:10000}];
   const today = new Date();
   const [calYear,  setCalYear]  = useState(2026);
-  const [calMonth, setCalMonth] = useState(4); // 0-based, 4=Maggio
+  const [calMonth, setCalMonth] = useState(new Date().getMonth());
 
   const tradesByDate = useMemo(() => allTrades.reduce((acc,t) => { if(!acc[t.date])acc[t.date]=[]; acc[t.date].push(t); return acc; }, {}), [allTrades]);
   const calData = useMemo(() => buildCalData(calYear, calMonth, tradesByDate), [calYear, calMonth, tradesByDate]);
@@ -3055,7 +3055,7 @@ const TemporalView = ({ C, trades, equity }) => {
     } else if (period === 'Settimana') {
       const active = calData.filter(c=>c.day!==null);
       const week = active.slice(0, 5);
-      pnl = week.reduce((s,d)=>s+d.pnl, 0);
+      pnl = week.reduce((s,d)=>s+(d.pnl||0), 0);
       trades = week.reduce((s,d)=>s+d.tradeCount, 0);
       wins = week.filter(d=>d.pnl>0).length;
       openCount = week.reduce((s,d)=>s+(d.openCount||0),0);
@@ -3065,9 +3065,18 @@ const TemporalView = ({ C, trades, equity }) => {
       wins = calData.filter(c=>c.day!==null&&c.pnl>0).length;
       label = `${MONTHS_IT[calMonth]} ${calYear}`;
     } else if (period === 'Anno') {
-      pnl = 2310.00; trades = 104; wins = 67; label = `${calYear} YTD`;
+      const yStr = `${calYear}-`;
+      const yTrades = allTrades.filter(t=>!t.open && t.date && t.date.startsWith(yStr));
+      pnl = yTrades.reduce((s,t)=>s+(t.pnl||0),0);
+      trades = yTrades.length;
+      wins = yTrades.filter(t=>t.pnl>0).length;
+      label = `${calYear} YTD`;
     } else if (period === 'Tutto') {
-      pnl = 2310.00; trades = 104; wins = 67; label = 'Cumulativo';
+      const allClosed = allTrades.filter(t=>!t.open);
+      pnl = allClosed.reduce((s,t)=>s+(t.pnl||0),0);
+      trades = allClosed.length;
+      wins = allClosed.filter(t=>t.pnl>0).length;
+      label = 'Cumulativo';
     }
     const wr = trades > 0 ? Math.round(wins/trades*100) : 0;
     return { pnl, trades, wins, wr, label, openCount };
@@ -3091,7 +3100,7 @@ const TemporalView = ({ C, trades, equity }) => {
         <Eyebrow C={C}>{periodSummary.label} · totale</Eyebrow>
         <div className="flex items-baseline justify-between flex-wrap gap-4">
           <div style={{fontFamily:FONT.display,fontSize:42,fontWeight:700,letterSpacing:'-1px',lineHeight:1,color:periodSummary.pnl>0?C.green:periodSummary.pnl<0?C.red:C.secondary,fontVariantNumeric:'tabular-nums', ...neonText(periodSummary.pnl>0?C.green:periodSummary.pnl<0?C.red:C.secondary, C.scheme)}}>
-            {periodSummary.pnl>0?'+':''}${periodSummary.pnl.toFixed(2)}
+            {periodSummary.pnl>0?'+':''}${(+(periodSummary.pnl||0)).toFixed(2)}
           </div>
           <div className="flex items-center gap-4 flex-wrap">
             <div>
@@ -3162,7 +3171,7 @@ const TemporalView = ({ C, trades, equity }) => {
             <div style={{color:C.primary,fontSize:14,fontFamily:FONT.display,fontWeight:700,letterSpacing:'-0.2px'}}>{MONTHS_IT[calMonth]}</div>
             <div className="flex items-center justify-center gap-3 mt-0.5">
               <span style={{color:calSummary.pnl>=0?C.green:C.red,fontSize:11,fontFamily:FONT.mono,fontWeight:700,fontVariantNumeric:'tabular-nums'}}>
-                {calSummary.pnl>=0?'+':''}${calSummary.pnl.toFixed(0)}
+                {calSummary.pnl>=0?'+':''}${(+(calSummary.pnl||0)).toFixed(0)}
               </span>
               <span style={{color:calSummary.pnl>=0?C.green:C.red,fontSize:11,fontFamily:FONT.mono,fontWeight:700,fontVariantNumeric:'tabular-nums'}}>
                 {calPct>=0?'+':''}{calPct.toFixed(2)}%
@@ -3211,7 +3220,7 @@ const TemporalView = ({ C, trades, equity }) => {
                 </div>
                 {c.pnl!==0&&(
                   <span style={{color:hasOpen?C.orange:baseColor,fontSize:11,fontFamily:FONT.mono,fontWeight:700,fontVariantNumeric:'tabular-nums',lineHeight:1,textAlign:'right',alignSelf:'flex-end',letterSpacing:'-0.5px'}}>
-                    {c.pnl>0?'+':''}{c.pnl.toFixed(0)}
+                    {(c.pnl??0)>0?'+':''}{ (+(c.pnl??0)).toFixed(0)}
                   </span>
                 )}
                 {c.pnl!==0&&<div style={{position:'absolute',bottom:0,left:0,right:0,height:2,borderRadius:'0 0 11px 11px',background:`${hasOpen?C.orange:baseColor}`,opacity:0.35+intensity*0.55,width:`${Math.round(30+intensity*70)}%`}}/>}
@@ -3236,7 +3245,7 @@ const TemporalView = ({ C, trades, equity }) => {
                   </div>
                   <div className="flex items-baseline gap-3 flex-wrap">
                     <div style={{color:selectedDay.pnl>0?C.green:selectedDay.pnl<0?C.red:C.secondary,fontSize:26,fontFamily:FONT.display,fontWeight:700,letterSpacing:'-0.6px',fontVariantNumeric:'tabular-nums', ...neonText(selectedDay.pnl>0?C.green:selectedDay.pnl<0?C.red:C.secondary, C.scheme)}}>
-                      {selectedDay.pnl>0?'+':''}${selectedDay.pnl.toFixed(2)}
+                      {selectedDay.pnl>0?'+':''}${(+(selectedDay.pnl||0)).toFixed(2)}
                     </div>
                     <div style={{color:selectedDay.pnl>0?C.green:selectedDay.pnl<0?C.red:C.secondary,fontSize:14,fontFamily:FONT.mono,fontWeight:600,opacity:0.8,fontVariantNumeric:'tabular-nums'}}>
                       {(selectedDay.pnl/10510*100>=0?'+':'')}{(selectedDay.pnl/10510*100).toFixed(2)}%
@@ -3366,7 +3375,7 @@ const BreakdownTable = ({ C, title, action, columns, rows, showColor, showRR, no
                   color: !row.rr || row.rr===0 ? C.tertiary : row.rr >= 2 ? C.cyan : row.rr >= 1.5 ? C.yellow : C.secondary,
                   textAlign:'right',fontVariantNumeric:'tabular-nums',
                   borderBottom: i < rows.length-1 ? `0.5px solid ${C.sep}` : 'none'}}>
-                  {row.rr ? row.rr.toFixed(1)+'R' : '—'}
+                  {row.rr ? (+row.rr).toFixed(1)+'R' : '—'}
                 </td>
               )}
               {!noPnl && (
@@ -3374,7 +3383,7 @@ const BreakdownTable = ({ C, title, action, columns, rows, showColor, showRR, no
                   color: row.pnl === 0 ? C.tertiary : row.pnl > 0 ? C.green : C.red,
                   textAlign:'right',fontVariantNumeric:'tabular-nums',
                   borderBottom: i < rows.length-1 ? `0.5px solid ${C.sep}` : 'none'}}>
-                  {row.pnl > 0 ? '+' : ''}${row.pnl.toFixed(2)}
+                  {row.pnl > 0 ? '+' : ''}${row.pnl!=null?(+row.pnl).toFixed(2):'—'}
                 </td>
               )}
               {!noPnl && row.avg !== undefined && (
@@ -3382,7 +3391,7 @@ const BreakdownTable = ({ C, title, action, columns, rows, showColor, showRR, no
                   color: row.avg === 0 ? C.tertiary : row.avg > 0 ? C.green : C.red,
                   textAlign:'right',fontVariantNumeric:'tabular-nums',
                   borderBottom: i < rows.length-1 ? `0.5px solid ${C.sep}` : 'none'}}>
-                  {row.avg > 0 ? '+' : ''}${row.avg.toFixed(2)}
+                  {row.avg > 0 ? '+' : ''}${row.avg!=null?(+row.avg).toFixed(2):'—'}
                 </td>
               )}
             </tr>
@@ -3566,7 +3575,7 @@ const SetupEdgeView = ({ C }) => {
     });
     return Object.values(comboMap).map(({combo,trades:tl,colors}) => {
       const wins = tl.filter(t=>t.pnl>0).length;
-      const pnl  = tl.reduce((s,t)=>s+t.pnl,0);
+      const pnl  = tl.reduce((s,t)=>s+(t.pnl||0),0);
       const rrs  = tl.filter(t=>t.rr>0).map(t=>t.rr);
       return { combo, trades:tl.length, wr:Math.round(wins/tl.length*100), rr:rrs.length?rrs.reduce((s,r)=>s+r,0)/rrs.length:0, pnl, avg:pnl/tl.length, colors };
     }).sort((a,b) => b.wr!==a.wr ? b.wr-a.wr : b.trades-a.trades);
@@ -3656,7 +3665,7 @@ const SetupEdgeView = ({ C }) => {
                   <span style={{color:C.red,fontWeight:700}}>{row.trades - wins}L</span>
                 </span>
                 <span style={{color:C.tertiary,fontSize:10}}>·</span>
-                <span style={{fontSize:10,fontFamily:FONT.mono,color:C.cyan,fontWeight:600}}>{row.rr.toFixed(1)}R medio</span>
+                <span style={{fontSize:10,fontFamily:FONT.mono,color:C.cyan,fontWeight:600}}>{row.rr!=null?(+row.rr).toFixed(1):'—'}R medio</span>
               </div>
             </div>
           );
@@ -3685,7 +3694,7 @@ const computeConfluenceBreakdown = (trades, confluences) => {
   });
   return Object.entries(confMap).map(([name,tlist])=>{
     const wins=tlist.filter(t=>t.pnl>0);
-    const pnl=tlist.reduce((s,t)=>s+t.pnl,0);
+    const pnl=tlist.reduce((s,t)=>s+(t.pnl||0),0);
     const rrs=tlist.filter(t=>t.rr>0).map(t=>t.rr);
     return { name, trades:tlist.length, wr:tlist.length?Math.round(wins.length/tlist.length*100):0,
       rr:rrs.length?rrs.reduce((s,r)=>s+r,0)/rrs.length:0, pnl, avg:tlist.length?pnl/tlist.length:0,
@@ -3702,7 +3711,7 @@ const computeConfidenceBreakdown = (trades, confidence) => {
   return [1,2,3,4,5].map(star=>{
     const tlist=buckets[star];
     const wins=tlist.filter(t=>t.pnl>0);
-    const pnl=tlist.reduce((s,t)=>s+t.pnl,0);
+    const pnl=tlist.reduce((s,t)=>s+(t.pnl||0),0);
     return { name:labels[star], trades:tlist.length,
       wr:tlist.length?Math.round(wins.length/tlist.length*100):0, pnl, avg:tlist.length?pnl/tlist.length:0 };
   }).filter(r=>r.trades>0);
@@ -3776,7 +3785,7 @@ const AnnualHeatmap = ({ C, data }) => {
           }}>
             <div style={{color:C.tertiary,fontSize:9,fontFamily:FONT.mono}}>{tooltip.date}</div>
             <div style={{color:tooltip.pnl>=0?C.green:C.red,fontSize:14,fontFamily:FONT.mono,fontWeight:700,fontVariantNumeric:'tabular-nums'}}>
-              {tooltip.pnl>=0?'+':''}${tooltip.pnl.toFixed(2)}
+              {(tooltip.pnl??0)>=0?'+':''}${(+(tooltip.pnl??0)).toFixed(2)}
             </div>
           </div>
         )}
