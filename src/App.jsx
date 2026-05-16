@@ -4549,7 +4549,7 @@ export default function TradingApp() {
       {/* BOTTOM TAB BAR */}
       <div className="fixed left-1/2 z-50" style={{
         transform: 'translateX(-50%)',
-        bottom: 10,
+        bottom: 17,
       }}>
         <div style={{
           background: C.glassBar,
@@ -4605,3 +4605,4 @@ export default function TradingApp() {
     </div>
   );
 }
+
