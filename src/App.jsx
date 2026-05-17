@@ -4345,7 +4345,7 @@ class ErrorBoundary extends React.Component {
 }
 
 /* ============= AI VIEW — Chat con Gemini ============= */
-const AIView = ({ C, trades, equity, settings, activeAccount, currentTab, setAiThinking }) => {
+const AIView = ({ C, trades, equity, settings, activeAccount, currentTab, setAiThinking, setInputFocused }) => {
   const [messages, setMessages] = usePersistedState('xt_ai_messages', []);
   const [input, setInput] = React.useState('');
   const [loading, setLoading] = React.useState(false);
@@ -4600,6 +4600,8 @@ const AIView = ({ C, trades, equity, settings, activeAccount, currentTab, setAiT
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
+            onFocus={() => setInputFocused?.(true)}
+            onBlur={() => setInputFocused?.(false)}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
             }}
@@ -5800,6 +5802,7 @@ export default function TradingApp() {
   const [activeAccount, setActiveAccount]  = usePersistedState('xt_active_account', 'main');
   const [settingsOpen, setSettingsOpen]    = useState(false);
   const [aiThinking, setAiThinking]        = useState(false);
+  const [inputFocused, setInputFocused]    = useState(false);
 
   const TAB_ORDER = ['daily', 'temporal', 'ai', 'metrics', 'analytics'];
   const [tabIdx, setTabIdx] = useState(0);
@@ -5950,7 +5953,7 @@ export default function TradingApp() {
       {TAB_ORDER[tabIdx] === 'ai' ? (
         <div style={{ flex:1, minHeight:0, overflow:'hidden', display:'flex', flexDirection:'column' }}>
           <div style={{ flex:1, minHeight:0, display:'flex', flexDirection:'column', maxWidth:896, width:'100%', margin:'0 auto', padding:'0 20px', paddingBottom:80 }}>
-            <ErrorBoundary C={C}><AIView C={C} trades={trades} equity={equity} settings={settings} activeAccount={activeAccount} currentTab="ai" setAiThinking={setAiThinking}/></ErrorBoundary>
+            <ErrorBoundary C={C}><AIView C={C} trades={trades} equity={equity} settings={settings} activeAccount={activeAccount} currentTab="ai" setAiThinking={setAiThinking} setInputFocused={setInputFocused}/></ErrorBoundary>
           </div>
         </div>
       ) : (
@@ -5967,10 +5970,15 @@ export default function TradingApp() {
 
 
 
-      {/* BOTTOM TAB BAR */}
+      {/* BOTTOM TAB BAR — si nasconde quando l'utente digita nell'input AI */}
       <div className="fixed left-1/2 z-50" style={{
-        transform: 'translateX(-50%)',
+        transform: inputFocused
+          ? 'translateX(-50%) translateY(120%)'
+          : 'translateX(-50%) translateY(0)',
+        opacity: inputFocused ? 0 : 1,
+        pointerEvents: inputFocused ? 'none' : 'auto',
         bottom: 17,
+        transition: 'transform 0.28s cubic-bezier(0.34, 1.18, 0.64, 1), opacity 0.22s ease-out',
       }}>
         <div style={{
           background: C.glassBar,
