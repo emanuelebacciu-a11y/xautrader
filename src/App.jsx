@@ -4378,40 +4378,39 @@ const TD_BASE = 'https://api.twelvedata.com';
 const TD_SYMBOL = 'XAU/USD';
 
 // Mapping TF app → { resolution TwelveData, aggregazione N, outputsize }
-// outputsize: numero di barre da chiedere a TD (dopo aggregazione = outputsize/N)
-// Piano gratuito TwelveData: max 5000 barre per chiamata.
+// Piano free TwelveData: 800 req/day, 8 req/min, max 5000 barre per chiamata.
+// outputsize è il numero di barre RAW richieste; le barre finali = floor(outputsize / aggN).
+// Per non perdere l'ultima candela parziale, aggregateBars include la coda anche incompleta.
 const TF_TD = {
-  '3m':  { res: '1min',  aggN: 3,  outputsize: 4500 }, // ~1500 barre finali (~3 giorni di mercato)
-  '7m':  { res: '1min',  aggN: 7,  outputsize: 4900 }, // ~700 barre finali (~7 giorni)
-  '13m': { res: '5min',  aggN: 3,  outputsize: 4500 }, // ~1500 barre finali (≈13min via 5min×3 = 15min, close enough)
-  '17m': { res: '5min',  aggN: 4,  outputsize: 4000 }, // ~1000 barre finali (≈20min)
-  '33m': { res: '15min', aggN: 2,  outputsize: 4000 }, // ~2000 barre finali (≈30min)
-  '90m': { res: '30min', aggN: 3,  outputsize: 3600 }, // ~1200 barre finali (~25 giorni)
-  '3h':  { res: '1h',    aggN: 3,  outputsize: 3000 }, // ~1000 barre finali (~125 giorni)
-  '6h':  { res: '1h',    aggN: 6,  outputsize: 3600 }, // ~600 barre finali (~150 giorni)
+  '3m':  { res: '1min',  aggN: 3,  outputsize: 2400 }, // ~800 barre finali (~2 giorni mercato)
+  '7m':  { res: '1min',  aggN: 7,  outputsize: 3500 }, // ~500 barre finali
+  '13m': { res: '5min',  aggN: 3,  outputsize: 1800 }, // ~600 barre finali (≈15min)
+  '17m': { res: '5min',  aggN: 4,  outputsize: 2000 }, // ~500 barre finali (≈20min)
+  '33m': { res: '15min', aggN: 2,  outputsize: 2000 }, // ~1000 barre finali (≈30min)
+  '90m': { res: '30min', aggN: 3,  outputsize: 1500 }, // ~500 barre finali
+  '3h':  { res: '1h',    aggN: 3,  outputsize: 1500 }, // ~500 barre finali (~60 giorni)
+  '6h':  { res: '1h',    aggN: 6,  outputsize: 3000 }, // ~500 barre finali (~120 giorni)
   '1D':  { res: '1day',  aggN: 1,  outputsize: 500  }, // 500 daily (~2 anni)
-  '3D':  { res: '1day',  aggN: 3,  outputsize: 1500 }, // ~500 barre finali (~4 anni)
+  '3D':  { res: '1day',  aggN: 3,  outputsize: 1500 }, // ~500 barre finali
 };
 
-// TwelveData ritorna timestamps come stringhe ISO "2026-05-17 14:32:00"
-// Per intraday LW Charts vuole unix seconds (int), per daily 'YYYY-MM-DD'
+// TwelveData ritorna timestamps come stringhe ISO "2026-05-17 14:32:00" (UTC per forex)
 const tdTimeParse = (str, isDaily) => {
   if (!str) return null;
   if (isDaily) return str.slice(0, 10); // 'YYYY-MM-DD'
-  // "2026-05-17 14:32:00" → unix seconds UTC
-  // TwelveData ritorna l'orario già in UTC per forex
   const ms = new Date(str.replace(' ', 'T') + 'Z').getTime();
   return isFinite(ms) ? Math.trunc(ms / 1000) : null;
 };
 
-// Aggrega N candele consecutive in una sola (per TF personalizzati)
+// Aggrega N candele consecutive in una sola.
+// IMPORTANTE: include anche la coda incompleta (< N barre) come candela parziale —
+// altrimenti le ultime N-1 barre raw vengono silenziosamente scartate, causando
+// la mancanza delle ultime 2-3 candele sui TF alti (H3, H6).
 const aggregateBars = (bars, n) => {
   if (n <= 1) return bars;
   const out = [];
-  // TwelveData ritorna le barre in ordine cronologico inverso (newest first)
-  // Le riceviamo già invertite (oldest first) dopo il parse
-  for (let i = 0; i + n <= bars.length; i += n) {
-    const slice = bars.slice(i, i + n);
+  for (let i = 0; i < bars.length; i += n) {
+    const slice = bars.slice(i, i + n); // slice prende quello che c'è, anche < n
     out.push({
       time:  slice[0].time,
       open:  slice[0].open,
@@ -4423,40 +4422,37 @@ const aggregateBars = (bars, n) => {
   return out;
 };
 
-// Filtra barre di weekend (sabato/domenica) per mercati forex — no gap fisici
-// Per intraday: rimuove barre fuori orario di mercato (forex chiude venerdì ~22UTC, apre domenica ~22UTC)
+// Filtra barre fuori orario forex (sabato intero, domenica prima delle 21:00 UTC,
+// venerdì dopo le 22:00 UTC). Elimina i gap di chiusura weekend prima della rimappatura.
 const filterForexBars = (bars, isDaily) => {
   if (isDaily) {
-    // Per daily: rimuovi sabato (6) e domenica (0) in UTC
     return bars.filter(b => {
-      const d = new Date(b.time + 'T00:00:00Z');
-      const dow = d.getUTCDay();
-      return dow !== 0 && dow !== 6;
+      const dow = new Date(b.time + 'T00:00:00Z').getUTCDay();
+      return dow !== 0 && dow !== 6; // esclude domenica (0) e sabato (6)
     });
   }
-  // Per intraday: rimuovi barre di sabato UTC e domenica UTC
-  // e barre con timestamp < domenica 22:00 UTC (mercato ancora chiuso)
   return bars.filter(b => {
     const d = new Date(b.time * 1000);
-    const dow = d.getUTCDay();
+    const dow  = d.getUTCDay();
     const utcH = d.getUTCHours();
-    if (dow === 6) return false; // sabato: sempre fuori mercato
-    if (dow === 0 && utcH < 21) return false; // domenica prima delle 21:00 UTC
-    if (dow === 5 && utcH >= 22) return false; // venerdì dopo 22:00 UTC (chiusura)
+    if (dow === 6) return false;                   // sabato: sempre chiuso
+    if (dow === 0 && utcH < 21) return false;      // domenica: mercato apre ~21:00 UTC
+    if (dow === 5 && utcH >= 22) return false;     // venerdì: mercato chiude ~22:00 UTC
     return true;
   });
 };
 
-// Rimappa barre intraday a indici sequenziali per eliminare gap visivi in LW Charts v4.1
-// LW Charts con unix timestamp crea gap fisici nei weekend — usando indici interi il chart
-// resta compatto e continuo come TradingView. Mantiene una mappa index→originalTime
-// per il crosshair e il posizionamento dei trade.
-const remapToSequentialIndex = (bars) => {
-  return bars.map((b, i) => ({ ...b, originalTime: b.time, time: i }));
-};
+// Rimappa le barre intraday a indici sequenziali 0,1,2,…
+// LW Charts v4.1.x con unix timestamp lascia gap fisici nei weekend perché
+// il tempo reale scorre anche quando il mercato è chiuso.
+// Con indici interi le candele sono sempre contigue — identico a TradingView.
+// Salviamo originalTime su ogni barra per il tickMarkFormatter e il posizionamento trade.
+const remapSequential = (bars) =>
+  bars.map((b, i) => ({ ...b, originalTime: b.time, time: i }));
 
+// Cache per TF → { bars, spotData, ts }
 const _tdCache = {};
-const TD_TTL_MS = 90_000; // 90s — ricarica al massimo ogni 90s (dati storici abbondanti)
+const TD_TTL_MS = 90_000; // 90s
 
 const fetchChartData = async (tf) => {
   const now = Date.now();
@@ -4467,8 +4463,6 @@ const fetchChartData = async (tf) => {
   const { res, aggN, outputsize } = TF_TD[tf];
   const isDaily = res === '1day' || res === '1week';
 
-  // TwelveData /time_series endpoint — CORS aperto dal browser
-  // Piano free: 800 req/day, 8 req/min, outputsize max 5000 per chiamata
   const url = new URL(`${TD_BASE}/time_series`);
   url.searchParams.set('symbol',     TD_SYMBOL);
   url.searchParams.set('interval',   res);
@@ -4478,13 +4472,11 @@ const fetchChartData = async (tf) => {
 
   const resp = await fetch(url.toString(), {
     mode: 'cors',
-    signal: AbortSignal.timeout(12000),
+    signal: AbortSignal.timeout(15000),
   });
   if (!resp.ok) throw new Error(`TwelveData HTTP ${resp.status}`);
 
   const json = await resp.json();
-
-  // Gestione errori API TwelveData
   if (json.status === 'error') {
     throw new Error(`TwelveData: ${json.message || json.code || 'errore sconosciuto'}`);
   }
@@ -4492,7 +4484,7 @@ const fetchChartData = async (tf) => {
     throw new Error('TwelveData: nessun dato ricevuto (mercato chiuso o quota esaurita)');
   }
 
-  // Parse: TD ritorna newest-first → invertiamo a oldest-first
+  // Parse newest-first → oldest-first
   const seen = new Set();
   const parsed = json.values
     .map(v => {
@@ -4515,19 +4507,16 @@ const fetchChartData = async (tf) => {
 
   if (parsed.length === 0) throw new Error('TwelveData: nessuna barra valida dopo il parse');
 
-  // Aggrega se necessario (TF personalizzati)
+  // 1. Aggrega (include coda incompleta → ultima candela sempre presente)
   const aggregated = aggregateBars(parsed, aggN);
-  if (aggregated.length === 0) throw new Error('TwelveData: aggregazione ha prodotto 0 barre');
 
-  // Filtra weekend e gap di chiusura forex (sabato pieno, domenica <21UTC, venerdì >22UTC)
+  // 2. Filtra weekend/chiusura forex
   const filtered = filterForexBars(aggregated, isDaily);
-  if (filtered.length === 0) throw new Error('TwelveData: nessuna barra valida dopo il filtro forex');
+  if (filtered.length === 0) throw new Error('TwelveData: nessuna barra dopo filtro forex');
 
-  // Rimappa a indici sequenziali per intraday → elimina gap visivi weekend/chiusura in LW Charts v4.1
-  // Per daily le stringhe YYYY-MM-DD sono già gestite senza gap da LW Charts nativamente
-  const bars = isDaily ? filtered : remapToSequentialIndex(filtered);
+  // 3. Per intraday: rimappa a indici sequenziali per grafico senza gap
+  const bars = isDaily ? filtered : remapSequential(filtered);
 
-  // Estrai spot info dall'ultima barra (usa originalTime se disponibile)
   const last = bars[bars.length - 1];
   const prev = bars.length > 1 ? bars[bars.length - 2] : null;
   const ch   = prev ? last.close - prev.close : 0;
@@ -4535,14 +4524,13 @@ const fetchChartData = async (tf) => {
   const spotData = {
     price:     last.close,
     prevClose: prev?.close ?? last.open,
-    ch,
-    chp,
+    ch, chp,
     source:    'twelvedata',
   };
 
-  const result = { bars, spotData };
+  const result = { bars, spotData, isDaily };
   _tdCache[tf] = { data: result, ts: now };
-  console.log(`[Chart] TwelveData XAU/USD ${tf}: ${bars.length} barre, ultimo close $${last.close}`);
+  console.log(`[Chart] XAU/USD ${tf}: ${bars.length} barre, close $${last.close}`);
   return result;
 };
 
@@ -4594,79 +4582,71 @@ const ChartView = ({ C, trades }) => {
     const H   = canvas.height;
     ctx.clearRect(0, 0, W, H);
 
-    // Calcola larghezza di una candela in pixel per estendere i trade aperti
     const visRange = chart.timeScale().getVisibleLogicalRange();
-    let candleW = 8; // fallback
+    let candleW = 8;
     if (visRange && bars.length > 1) {
       const visibleBars = visRange.to - visRange.from;
       if (visibleBars > 0) candleW = W / visibleBars;
     }
-    // xMax per trade aperti: leggermente oltre il bordo destro
     const xOpenEnd = W + candleW * 0.5;
 
-    // Determina se le barre sono daily (string) o intraday con indice sequenziale (number)
-    const firstBarTime = bars[0]?.time;
-    const isBarDaily   = typeof firstBarTime === 'string';
-    const isIndexed    = !isBarDaily && bars[0]?.originalTime !== undefined;
+    // Determina il tipo di barre caricato
+    const isBarDaily  = typeof bars[0]?.time === 'string';
+    const isIndexed   = !isBarDaily && bars[0]?.originalTime !== undefined;
 
-    // Helper: converte unix-seconds (o date string) → indice sequenziale o time nativo per timeToX
-    const findBarIndex = (targetUnix) => {
-      if (!isIndexed) return targetUnix; // daily: ritorna la string
-      // Cerca la barra con originalTime più vicino (bisezione)
+    // Trova l'indice (o la stringa daily) della barra con originalTime più vicino al target unix.
+    // Per daily (stringhe YYYY-MM-DD): usa direttamente dateStr.
+    // Per intraday indicizzati: bisezione su originalTime, ritorna l'indice sequenziale.
+    const findBarKey = (targetUnix, dateStr) => {
+      if (isBarDaily) return dateStr;
+      if (!isIndexed) return targetUnix;
       let lo = 0, hi = bars.length - 1;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
         if (bars[mid].originalTime < targetUnix) lo = mid + 1;
         else hi = mid;
       }
-      // Scegli quello con differenza minima
+      // Scegli il più vicino tra lo-1 e lo
       if (lo > 0 && Math.abs(bars[lo-1].originalTime - targetUnix) < Math.abs(bars[lo].originalTime - targetUnix)) lo--;
       return bars[lo].time; // indice sequenziale
     };
 
     trades.forEach(tr => {
       if (!tr.entry || !tr.sl) return;
-      const isLong = tr.dir === 'LONG' || tr.dir === 'BUY';
 
       const yEntry = priceToY(chart, series, tr.entry);
       const ySL    = priceToY(chart, series, tr.sl);
       const yTP    = tr.tp ? priceToY(chart, series, tr.tp) : null;
       if (yEntry === null || ySL === null) return;
 
-      // ── Conversione timestamp trade → indice barra sequenziale (o string daily) per timeToX ──
-      // I trade sono in ora locale CET/CEST; le barre intraday usano unix UTC.
-      // Per intraday: convertiamo a unix seconds UTC, poi troviamo la barra con originalTime più vicino.
-      const makeUnixOrDate = (dateStr, timeStr) => {
+      // Converte date+time locale (CET/CEST) → unix seconds UTC
+      const toUnix = (dateStr, timeStr) => {
         if (!dateStr) return null;
-        if (isBarDaily) return dateStr; // daily: stringa YYYY-MM-DD
         const hhmm = timeStr ? timeStr.slice(0, 5) : '00:00';
-        const ms = new Date(`${dateStr}T${hhmm}:00`).getTime(); // ora locale browser → UTC
-        if (!isFinite(ms)) return null;
-        return Math.trunc(ms / 1000); // unix seconds UTC
+        const ms = new Date(`${dateStr}T${hhmm}:00`).getTime(); // ora locale browser
+        return isFinite(ms) ? Math.trunc(ms / 1000) : null;
       };
 
-      const entryRaw = makeUnixOrDate(tr.date, tr.timeEntry);
-      const entryKey = entryRaw !== null ? findBarIndex(entryRaw) : null;
+      const entryUnix = toUnix(tr.date, tr.timeEntry);
+      const entryKey  = entryUnix !== null ? findBarKey(entryUnix, tr.date) : null;
       let xEntry = entryKey !== null ? timeToX(chart, entryKey) : null;
       if (xEntry === null) xEntry = 0;
 
-      let xExit;
+      let xExit = null;
       if (!tr.open && tr.dateExit && tr.timeExit) {
-        const exitRaw = makeUnixOrDate(tr.dateExit, tr.timeExit);
-        const exitKey = exitRaw !== null ? findBarIndex(exitRaw) : null;
+        const exitUnix = toUnix(tr.dateExit, tr.timeExit);
+        const exitKey  = exitUnix !== null ? findBarKey(exitUnix, tr.dateExit) : null;
         const xExitRaw = exitKey !== null ? timeToX(chart, exitKey) : null;
-        xExit = xExitRaw !== null ? xExitRaw + candleW * 0.5 : null;
+        if (xExitRaw !== null) xExit = xExitRaw + candleW * 0.5;
       }
 
-      // Trade aperto: estendi 3-4 candele oltre l'ultima visibile
       const xR = (!tr.open && xExit != null && xExit > xEntry)
         ? xExit
-        : xOpenEnd + candleW * 3; // 3 candele fuori dal bordo visibile
-
+        : xOpenEnd + candleW * 3;
       const xL = xEntry;
       if (xR - xL < 1) return;
 
-      // ── Zona SL ──
+      // Zona SL
       const ySlTop = Math.min(yEntry, ySL);
       const ySlBot = Math.max(yEntry, ySL);
       const slH    = ySlBot - ySlTop;
@@ -4675,7 +4655,7 @@ const ChartView = ({ C, trades }) => {
         ctx.fillRect(xL, ySlTop, xR - xL, slH);
       }
 
-      // ── Zona TP ──
+      // Zona TP
       let tpH = 0;
       if (yTP !== null) {
         const yTpTop = Math.min(yEntry, yTP);
@@ -4687,7 +4667,7 @@ const ChartView = ({ C, trades }) => {
         }
       }
 
-      // ── RR label ──
+      // RR label
       const rr = tr.rr != null && tr.rr !== 0
         ? tr.rr
         : (() => {
@@ -4782,14 +4762,12 @@ const ChartView = ({ C, trades }) => {
       },
       leftPriceScale:  { visible: false },
       timeScale: {
-        borderVisible:    false,
-        // Con indici sequenziali timeVisible non ha effetto — usiamo tickMarkFormatter custom
-        timeVisible:      false,
-        secondsVisible:   false,
-        rightOffset:      7,
-        barSpacing:       8,
-        minBarSpacing:    1,
-        // tickMarkFormatter non usato qui — applicato dinamicamente in loadData
+        borderVisible:  false,
+        timeVisible:    false,  // gestito dinamicamente in loadData dopo il fetch
+        secondsVisible: false,
+        rightOffset:    7,
+        barSpacing:     8,
+        minBarSpacing:  1,
       },
       watermark: {
         visible:   true,
@@ -4864,36 +4842,33 @@ const ChartView = ({ C, trades }) => {
       if (!series) return;
       barsRef.current = [];
 
-      const { bars, spotData } = await fetchChartData(targetTf);
+      const { bars, spotData, isDaily } = await fetchChartData(targetTf);
       if (tfRef.current !== targetTf) return;
       if (!seriesRef.current) return;
 
       barsRef.current = bars;
 
-      // Determina se le barre sono daily (YYYY-MM-DD string) o intraday indicizzate (number)
-      const isDaily   = ['1D','3D'].includes(targetTf);
+      // Per intraday indicizzati: timeVisible:false (gli indici non sono date leggibili)
+      // + tickMarkFormatter custom che mostra data/ora reale dall'originalTime
       const isIndexed = !isDaily && bars.length > 0 && bars[0].originalTime !== undefined;
 
-      // tickMarkFormatter: mostra data/ora reale dalle originalTime anche con indici sequenziali
-      let tickMarkFormatter;
-      if (isIndexed) {
-        const tfMin = { '3m':3,'7m':7,'13m':15,'17m':20,'33m':30,'90m':90,'3h':180,'6h':360 }[targetTf] || 17;
-        tickMarkFormatter = (idx, markType) => {
-          const bar = bars[idx];
-          if (!bar || bar.originalTime == null) return '';
-          const d = new Date(bar.originalTime * 1000);
-          const pad = n => String(n).padStart(2, '0');
-          // markType 0 = anno, 1 = mese, 2 = giorno, 3 = ora, 4 = minuto
-          if (markType <= 1) return `${d.getUTCFullYear()}`;
-          if (markType === 2) return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth()+1)}`;
-          return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
-        };
-      }
+      const tickMarkFormatter = isIndexed
+        ? (idx, markType) => {
+            const bar = bars[idx];
+            if (!bar || bar.originalTime == null) return '';
+            const d = new Date(bar.originalTime * 1000);
+            const pad = n => String(n).padStart(2, '0');
+            // markType: 0=anno, 1=mese, 2=giorno, 3=ora, 4=minuto
+            if (markType <= 1) return `${d.getUTCFullYear()}`;
+            if (markType === 2) return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth()+1)}`;
+            return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+          }
+        : undefined;
 
       chartRef.current.applyOptions({
         timeScale: {
-          timeVisible:  isIndexed, // indici: i tick sono gestiti dal formatter
-          tickMarkFormatter: tickMarkFormatter || undefined,
+          timeVisible:       isDaily,         // true solo per daily (YYYY-MM-DD string native)
+          tickMarkFormatter: tickMarkFormatter ?? null,
         },
       });
 
