@@ -4895,7 +4895,21 @@ const ChartView = ({ C, trades }) => {
           }
         : null;
 
+      // timeFormatter: controlla la label del crosshair sull'asse X (indice → data/ora)
+      const timeFormatter = isIndexed
+        ? (idx) => {
+            const bar = bars[typeof idx === 'number' ? idx : 0];
+            if (!bar || bar.originalTime == null) return String(idx);
+            const d   = new Date(bar.originalTime * 1000);
+            const pad = n => String(n).padStart(2,'0');
+            return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth()+1)} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+          }
+        : null;
+
       chartRef.current.applyOptions({
+        localization: {
+          timeFormatter: timeFormatter || undefined,
+        },
         timeScale: {
           timeVisible:       isDaily,
           tickMarkFormatter: tickMarkFormatter,
@@ -4933,7 +4947,7 @@ const ChartView = ({ C, trades }) => {
   }, [lwReady, tf, loadData]);
 
   return (
-    <div style={{ position:'absolute', inset:0, bottom:0, background:'#000', display:'flex', flexDirection:'column' }}>
+    <div style={{ position:'absolute', top:0, left:0, right:0, bottom:'calc(env(safe-area-inset-bottom, 0px) + 82px)', background:'#000', display:'flex', flexDirection:'column' }}>
 
       {/* Toolbar TF */}
       <div className="flex items-center justify-between px-3" style={{
@@ -5261,14 +5275,9 @@ export default function TradingApp() {
         </div>
       )}
 
-      {/* CHART — si ferma sopra la tab bar */}
+      {/* CHART — flex:1, il margine dalla tab bar è gestito dentro ChartView */}
       {TAB_ORDER[tabIdx] === 'chart' && (
-        <div style={{
-          flex: 1,
-          position: 'relative',
-          overflow: 'hidden',
-          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 90px)',
-        }}>
+        <div style={{ flex:1, position:'relative', overflow:'hidden' }}>
           <ErrorBoundary C={C}>
             <ChartView C={C} trades={trades}/>
           </ErrorBoundary>
