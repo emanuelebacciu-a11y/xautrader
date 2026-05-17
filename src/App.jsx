@@ -2144,6 +2144,31 @@ const IconAnalytics = ({ color }) => (
   </svg>
 );
 
+/* IconAI — orb "pensante" con puntini bianchi/grigi.
+   Pattern: cerchio outer + diversi nodi interni distribuiti, varie tonalità.
+   Niente colore vivo: solo grigi/bianchi per essere "neutra" come chiesto. */
+const IconAI = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+    {/* Sfera outer con gradient grigio/bianco */}
+    <defs>
+      <radialGradient id="xt-ai-orb" cx="35%" cy="32%" r="70%">
+        <stop offset="0%"   stopColor="#FFFFFF" stopOpacity="0.95"/>
+        <stop offset="55%"  stopColor="#A8A8AD" stopOpacity="0.85"/>
+        <stop offset="100%" stopColor="#3A3A3C" stopOpacity="0.95"/>
+      </radialGradient>
+    </defs>
+    <circle cx="12" cy="12" r="10" fill="url(#xt-ai-orb)"/>
+    {/* Nodi interni che ricordano un network "pensante" */}
+    <circle cx="8.2"  cy="9.5"  r="1.4" fill="#FFFFFF" opacity="0.95"/>
+    <circle cx="14.8" cy="8.8"  r="1.1" fill="#E5E5EA" opacity="0.85"/>
+    <circle cx="15.6" cy="14.2" r="1.2" fill="#FFFFFF" opacity="0.8"/>
+    <circle cx="9.2"  cy="14.8" r="0.9" fill="#C7C7CC" opacity="0.75"/>
+    <circle cx="11.8" cy="11.6" r="0.7" fill="#8E8E93" opacity="0.7"/>
+    {/* Highlight superiore */}
+    <ellipse cx="9" cy="7.5" rx="2.6" ry="1.4" fill="#FFFFFF" opacity="0.28"/>
+  </svg>
+);
+
 const IconChart = ({ color }) => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
     <rect x="2" y="2" width="20" height="20" rx="2" stroke={color} strokeWidth="1.8"/>
@@ -2154,6 +2179,7 @@ const IconChart = ({ color }) => (
 const tabIcons = (C) => ({
   daily:     { glyph: IconToday,     gradient: `linear-gradient(135deg, ${C.green}, #14a300)` },
   temporal:  { glyph: IconHistory,   gradient: `linear-gradient(135deg, ${C.cyan}, #0099b3)` },
+  ai:        { glyph: IconAI,        gradient: null /* speciale: nessun gradient — l'icona è autosufficiente */ },
   metrics:   { glyph: IconStats,     gradient: `linear-gradient(135deg, ${C.red}, #b3001a)` },
   analytics: { glyph: IconAnalytics, gradient: `linear-gradient(135deg, ${C.purple}, #5500cc)` },
   stats:     { glyph: IconAnalytics, gradient: `linear-gradient(135deg, ${C.pink}, #7a2eb5)` },
@@ -3912,6 +3938,289 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+/* ============= AI VIEW — Chat con Gemini ============= */
+const AIView = ({ C, trades, equity, settings, activeAccount, currentTab }) => {
+  const [messages, setMessages] = usePersistedState('xt_ai_messages', []);
+  const [input, setInput] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const scrollRef = React.useRef(null);
+  const inputRef = React.useRef(null);
+
+  // Auto-scroll in fondo quando arrivano messaggi
+  React.useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, loading]);
+
+  // Costruisce il pacchetto contesto da inviare a Gemini
+  const buildContext = React.useCallback(() => {
+    const allTrades = trades || [];
+    const closed = allTrades.filter(t => !t.open);
+    const stats = computeAllStats(allTrades);
+
+    const recent = [...closed].sort((a,b) => (b.date||'').localeCompare(a.date||'')).slice(0, 30).map(t => ({
+      data: t.date, dir: t.dir, sess: t.session, pnl: t.pnl, rr: t.rr,
+      closed: t.closed, type: t.tradeType, dur_min: t.duration,
+      mae: t.mae, mfe: t.mfe,
+    }));
+
+    let notes = {}, confluences = {}, confidence = {};
+    try {
+      notes       = JSON.parse(localStorage.getItem('xt_notes') || '{}');
+      confluences = JSON.parse(localStorage.getItem('xt_confluences') || '{}');
+      confidence  = JSON.parse(localStorage.getItem('xt_confidence') || '{}');
+    } catch {}
+
+    return {
+      stato_corrente: {
+        tab_attiva: currentTab, account: activeAccount,
+        ora: new Date().toLocaleString('it-IT'),
+      },
+      riassunto: stats ? {
+        trade_totali: closed.length,
+        win_rate_pct: stats.general?.[0]?.value,
+        profit_totale: stats.general?.[1]?.value,
+        profit_factor: stats.risk?.[0]?.value,
+        sharpe_annual: stats.risk?.[2]?.value,
+        max_drawdown:  stats.risk?.[5]?.value,
+        miglior_sessione: stats.breakSess?.[0]?.name,
+        peggior_sessione: stats.breakSess?.[stats.breakSess.length-1]?.name,
+        roi_totale: stats.roi?.[0]?.value,
+      } : 'Nessun trade chiuso ancora',
+      ultimi_30_trade: recent,
+      breakdown_sessione: stats?.breakSess || [],
+      breakdown_giorno:   (stats?.breakDay || []).filter(d => d.trades > 0),
+      breakdown_tipo:     stats?.breakType || [],
+      note_trader_count: Object.keys(notes).length,
+      confluenze_taggate_count: Object.keys(confluences).length,
+      confidence_ratings_count: Object.keys(confidence).length,
+    };
+  }, [trades, equity, settings, activeAccount, currentTab]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+    setError(null);
+    const newMessages = [...messages, { role: 'user', content: text }];
+    setMessages(newMessages);
+    setInput('');
+    setLoading(true);
+    haptic.light();
+
+    try {
+      const ctx = buildContext();
+      const r = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: newMessages, context: ctx }),
+      });
+      const data = await r.json();
+      if (!r.ok) { setError(data.error || `Errore ${r.status}`); haptic.error(); }
+      else {
+        setMessages([...newMessages, { role: 'assistant', content: data.text }]);
+        haptic.success();
+      }
+    } catch (err) {
+      setError('Connessione fallita: ' + err.message);
+      haptic.error();
+    } finally { setLoading(false); }
+  };
+
+  const clearChat = () => {
+    if (messages.length === 0) return;
+    if (window.confirm('Cancellare tutta la conversazione?')) {
+      haptic.medium();
+      setMessages([]);
+      setError(null);
+    }
+  };
+
+  const suggestions = [
+    'Quali sono i miei orari migliori?',
+    'Confronta questa settimana con la precedente',
+    'Quale sessione mi rende di più?',
+    'Vedi pattern nei miei loss?',
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* HEADER */}
+      <div className="flex items-center justify-between flex-wrap gap-3 px-1">
+        <div className="flex items-center gap-3">
+          <div style={{
+            width: 38, height: 38, borderRadius: 13,
+            background: 'transparent',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <IconAI/>
+          </div>
+          <div>
+            <h1 style={{
+              fontFamily: FONT.display, fontSize: 24, fontWeight: 700,
+              letterSpacing: '-0.5px', color: C.primary, lineHeight: 1,
+            }}>Coach AI</h1>
+            <div style={{
+              color: C.tertiary, fontSize: 10, fontFamily: FONT.mono,
+              fontWeight: 600, letterSpacing: '0.3px', marginTop: 2,
+            }}>GEMINI 2.0 · DESCRITTIVO</div>
+          </div>
+        </div>
+        {messages.length > 0 && (
+          <button onClick={clearChat} className="xt-btn" style={{
+            padding: '6px 12px', fontSize: 11, fontFamily: FONT.text, fontWeight: 600,
+            color: C.tertiary, background: 'transparent',
+            border: `0.5px solid ${C.sep}`, borderRadius: RADIUS.pill,
+            cursor: 'pointer',
+          }}>Nuova chat</button>
+        )}
+      </div>
+
+      {/* MESSAGGI */}
+      <div ref={scrollRef} style={{
+        minHeight: 280, maxHeight: 'calc(100dvh - 360px)',
+        overflowY: 'auto', overflowX: 'hidden',
+        WebkitOverflowScrolling: 'touch', padding: '4px 2px',
+      }}>
+        {messages.length === 0 && (
+          <Glass C={C} padding="p-6">
+            <div className="flex flex-col items-center text-center gap-3">
+              <div style={{
+                width: 64, height: 64, borderRadius: 20,
+                background: 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <IconAI/>
+              </div>
+              <div>
+                <div style={{
+                  color: C.primary, fontSize: 16, fontFamily: FONT.display,
+                  fontWeight: 700, letterSpacing: '-0.3px', marginBottom: 4,
+                }}>Chiedimi qualunque cosa</div>
+                <div style={{
+                  color: C.tertiary, fontSize: 12, fontFamily: FONT.text,
+                  lineHeight: 1.5, maxWidth: 280,
+                }}>
+                  Ho accesso completo ai tuoi trade, metriche e note.
+                  Rispondo descrivendo i dati, non do consigli operativi.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center mt-2">
+                {suggestions.map((s, i) => (
+                  <button key={i} onClick={() => { haptic.selection(); setInput(s); inputRef.current?.focus(); }}
+                    className="xt-btn xt-chip" style={{
+                    padding: '6px 12px', fontSize: 11, fontFamily: FONT.text, fontWeight: 500,
+                    color: C.secondary, background: C.glass2,
+                    border: `0.5px solid ${C.sep}`, borderRadius: RADIUS.pill,
+                    cursor: 'pointer', letterSpacing: '-0.08px',
+                  }}>{s}</button>
+                ))}
+              </div>
+            </div>
+          </Glass>
+        )}
+
+        {messages.map((m, i) => (
+          <div key={i} className="xt-page" style={{
+            display: 'flex',
+            justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
+            marginBottom: 10,
+          }}>
+            <div style={{
+              maxWidth: '85%',
+              padding: '10px 14px',
+              borderRadius: m.role === 'user' ? '20px 20px 6px 20px' : '20px 20px 20px 6px',
+              background: m.role === 'user' ? C.glass3 : C.glass2,
+              backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+              border: `0.5px solid ${C.sep2}`,
+              color: C.primary,
+              fontSize: 14, fontFamily: FONT.text, fontWeight: 400,
+              letterSpacing: '-0.1px', lineHeight: 1.45,
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              boxShadow: '0 1px 0 rgba(255,255,255,0.04) inset',
+            }}>{m.content}</div>
+          </div>
+        ))}
+
+        {loading && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 10 }}>
+            <div style={{
+              padding: '12px 16px',
+              borderRadius: '20px 20px 20px 6px',
+              background: C.glass2,
+              border: `0.5px solid ${C.sep2}`,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              {[0,1,2].map(i => (
+                <div key={i} className="xt-live-dot" style={{
+                  width: 6, height: 6, borderRadius: 3,
+                  background: C.secondary, opacity: 0.6,
+                  animationDelay: `${i * 0.15}s`,
+                }}/>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div style={{
+            background: `${C.red}15`,
+            border: `0.5px solid ${C.red}40`,
+            borderRadius: 14, padding: '10px 14px',
+            color: C.red, fontSize: 12, fontFamily: FONT.mono,
+            marginBottom: 10,
+          }}>⚠️ {error}</div>
+        )}
+      </div>
+
+      {/* INPUT */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-end', gap: 8,
+        background: C.glass, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        border: `0.5px solid ${C.sep2}`,
+        borderRadius: 24, padding: '6px 6px 6px 14px',
+      }}>
+        <textarea
+          ref={inputRef}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+          }}
+          placeholder="Chiedi qualcosa sui tuoi dati..."
+          rows={1}
+          style={{
+            flex: 1, background: 'transparent', border: 'none', outline: 'none',
+            color: C.primary, fontSize: 14, fontFamily: FONT.text,
+            resize: 'none', padding: '8px 0', maxHeight: 120,
+            letterSpacing: '-0.1px', lineHeight: 1.4,
+          }}
+        />
+        <button onClick={send} disabled={loading || !input.trim()} className="xt-btn" style={{
+          width: 36, height: 36, borderRadius: 18,
+          background: !input.trim() || loading ? C.glass3 : C.primary,
+          border: 'none', cursor: !input.trim() || loading ? 'default' : 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0, transition: 'all 0.2s',
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M5 12h14M13 5l7 7-7 7"
+              stroke={!input.trim() || loading ? C.tertiary : C.bg}
+              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <div style={{
+        color: C.tertiary, fontSize: 10, fontFamily: FONT.mono,
+        textAlign: 'center', padding: '0 4px', lineHeight: 1.5,
+      }}>
+        L'AI è solo descrittiva — analizza i tuoi dati e descrive pattern.<br/>
+        Non dà consigli operativi né previsioni di mercato.
+      </div>
+    </div>
+  );
+};
+
 /* ============= METRICHE STANDALONE PAGE ============= */
 /* ============= METRICS ONLY VIEW (tab rossa) ============= */
 const MetricsOnlyView = ({ C, trades }) => {
@@ -5080,7 +5389,7 @@ export default function TradingApp() {
   const [activeAccount, setActiveAccount]  = usePersistedState('xt_active_account', 'main');
   const [settingsOpen, setSettingsOpen]    = useState(false);
 
-  const TAB_ORDER = ['daily', 'temporal', 'metrics', 'analytics'];
+  const TAB_ORDER = ['daily', 'temporal', 'ai', 'metrics', 'analytics'];
   const [tabIdx, setTabIdx] = useState(0);
   const tabIdxRef = useRef(0); // mirror di tabIdx, accessibile nei listener senza closure stale
 
@@ -5108,6 +5417,7 @@ export default function TradingApp() {
   const tabs = [
     { id:'daily',     label:'Oggi'    },
     { id:'temporal',  label:'Storico' },
+    { id:'ai',        label:'AI'      },
     { id:'metrics',   label:'Stats'   },
     { id:'analytics', label:'Analisi' },
   ];
@@ -5229,9 +5539,10 @@ export default function TradingApp() {
         <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none', paddingBottom:'env(safe-area-inset-bottom, 0px)' }}>
           <div className="max-w-7xl mx-auto px-5 py-4"
             style={{ paddingBottom: 70 }}>
-            {TAB_ORDER[tabIdx] === 'daily'     && <ErrorBoundary C={C}><DailyView     C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
-            {TAB_ORDER[tabIdx] === 'temporal'  && <ErrorBoundary C={C}><TemporalView  C={C} trades={trades} equity={equity}/></ErrorBoundary>}
-            {TAB_ORDER[tabIdx] === 'metrics'   && <ErrorBoundary C={C}><MetricsOnlyView C={C} trades={trades}/></ErrorBoundary>}
+            {TAB_ORDER[tabIdx] === 'daily'     && <ErrorBoundary C={C}><DailyView         C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
+            {TAB_ORDER[tabIdx] === 'temporal'  && <ErrorBoundary C={C}><TemporalView      C={C} trades={trades} equity={equity}/></ErrorBoundary>}
+            {TAB_ORDER[tabIdx] === 'ai'        && <ErrorBoundary C={C}><AIView            C={C} trades={trades} equity={equity} settings={settings} activeAccount={activeAccount} currentTab="ai"/></ErrorBoundary>}
+            {TAB_ORDER[tabIdx] === 'metrics'   && <ErrorBoundary C={C}><MetricsOnlyView   C={C} trades={trades}/></ErrorBoundary>}
             {TAB_ORDER[tabIdx] === 'analytics' && <ErrorBoundary C={C}><AnalyticsFullView C={C} trades={trades}/></ErrorBoundary>}
           </div>
         </div>
@@ -5262,17 +5573,31 @@ export default function TradingApp() {
             const active = tabIdx === i;
             const Icon = icons[t.id]?.glyph;
             const grad = icons[t.id]?.gradient;
+            const isAI = t.id === 'ai';
             return (
               <button key={t.id} onClick={() => handleTabTap(i)}
                       className="xt-tab-btn flex items-center"
                       style={{
                         padding: '7px 14px',
                         borderRadius: 30,
-                        background: active ? (scheme==='dark'?'rgba(255,255,255,0.09)':'rgba(0,0,0,0.06)') : 'transparent',
+                        /* AI: nessun pill bg quando attiva, resta sempre trasparente */
+                        background: (!isAI && active) ? (scheme==='dark'?'rgba(255,255,255,0.09)':'rgba(0,0,0,0.06)') : 'transparent',
                         border: 'none', cursor: 'pointer',
                       }}>
                 <div className="xt-tab-icon">
-                  {Icon && grad ? (
+                  {isAI ? (
+                    /* AI: icona "orb pensante" 33px (1px più delle altre 32px), NO gradient bg, NO scale animato */
+                    <div style={{
+                      width: 33, height: 33, borderRadius: 11,
+                      background: 'transparent',
+                      display:'flex', alignItems:'center', justifyContent:'center',
+                      transform: active ? 'scale(1)' : 'scale(0.95)',
+                      transition:'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                      flexShrink: 0,
+                    }}>
+                      <Icon/>
+                    </div>
+                  ) : Icon && grad ? (
                     <AppIcon gradient={grad} active={active} size={32}>
                       <Icon color={C.iconBg}/>
                     </AppIcon>
