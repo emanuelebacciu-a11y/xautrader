@@ -4475,8 +4475,8 @@ const AIView = ({ C, trades, equity, settings, activeAccount, currentTab, setAiT
     <div style={{
       /* Container full height del pager — l'input resta sempre in fondo, mai coperto dalla tab bar */
       display: 'flex', flexDirection: 'column',
-      height: 'calc(100dvh - 96px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))',
-      minHeight: 400,
+      height: '100%',
+      minHeight: 0,
       gap: 12,
     }}>
       {/* Pulsante "Nuova chat" — appare solo quando ci sono messaggi, in alto a destra */}
@@ -5946,14 +5946,19 @@ export default function TradingApp() {
         </div>
       </header>
 
-      {/* PAGER — scrollabile solo nel content, non nella pagina */}
-      {(
+      {/* PAGER — tab AI: no scroll esterno, AIView gestisce layout internamente */}
+      {TAB_ORDER[tabIdx] === 'ai' ? (
+        <div style={{ flex:1, minHeight:0, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+          <div style={{ flex:1, minHeight:0, display:'flex', flexDirection:'column', maxWidth:896, width:'100%', margin:'0 auto', padding:'0 20px', paddingBottom:80 }}>
+            <ErrorBoundary C={C}><AIView C={C} trades={trades} equity={equity} settings={settings} activeAccount={activeAccount} currentTab="ai" setAiThinking={setAiThinking}/></ErrorBoundary>
+          </div>
+        </div>
+      ) : (
         <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none', paddingBottom:'env(safe-area-inset-bottom, 0px)' }}>
           <div className="max-w-7xl mx-auto px-5 py-4"
             style={{ paddingBottom: 70 }}>
             {TAB_ORDER[tabIdx] === 'daily'     && <ErrorBoundary C={C}><DailyView         C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
             {TAB_ORDER[tabIdx] === 'temporal'  && <ErrorBoundary C={C}><TemporalView      C={C} trades={trades} equity={equity}/></ErrorBoundary>}
-            {TAB_ORDER[tabIdx] === 'ai'        && <ErrorBoundary C={C}><AIView            C={C} trades={trades} equity={equity} settings={settings} activeAccount={activeAccount} currentTab="ai" setAiThinking={setAiThinking}/></ErrorBoundary>}
             {TAB_ORDER[tabIdx] === 'metrics'   && <ErrorBoundary C={C}><MetricsOnlyView   C={C} trades={trades}/></ErrorBoundary>}
             {TAB_ORDER[tabIdx] === 'analytics' && <ErrorBoundary C={C}><AnalyticsFullView C={C} trades={trades}/></ErrorBoundary>}
           </div>
@@ -6005,10 +6010,10 @@ export default function TradingApp() {
                        - thinking (AI sta elaborando): espansione rapida 1.1s + glow forte 1.3s */
                     <div className={`xt-orb-glow ${aiThinking ? 'xt-orb-thinking' : ''}`} style={{
                       width: 32, height: 32, borderRadius: 10,
-                      background: 'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.18) 0%, rgba(200,200,255,0.10) 60%, transparent 100%)',
+                      background: 'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.05) 0%, rgba(200,200,255,0.03) 60%, transparent 100%)',
                       boxShadow: active
-                        ? '0 0 10px 2px rgba(255,255,255,0.18), 0 0 4px 1px rgba(180,180,255,0.12)'
-                        : '0 0 6px 1px rgba(255,255,255,0.10)',
+                        ? '0 0 5px 1px rgba(255,255,255,0.06), 0 0 2px 1px rgba(180,180,255,0.04)'
+                        : '0 0 3px 1px rgba(255,255,255,0.03)',
                       display:'flex', alignItems:'center', justifyContent:'center',
                       transform: active ? 'scale(1.04)' : 'scale(1)',
                       transition:'transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1)',
