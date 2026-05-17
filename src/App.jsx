@@ -92,6 +92,24 @@ const GLOBAL_CSS = `
   }
   .xt-open-trade { animation: xt-open-glow 2.4s ease-in-out infinite; }
 
+  /* Animazione orb AI — rotazione lenta + pulsazione luminosità */
+  @keyframes xt-orb-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  @keyframes xt-orb-pulse {
+    0%, 100% { filter: drop-shadow(0 0 6px rgba(255,255,255,0.45)) drop-shadow(0 0 2px rgba(255,255,255,0.75)); }
+    50%      { filter: drop-shadow(0 0 12px rgba(255,255,255,0.7))  drop-shadow(0 0 3px rgba(255,255,255,0.9)); }
+  }
+  .xt-orb-animated {
+    animation: xt-orb-spin 22s linear infinite;
+    will-change: transform;
+  }
+  .xt-orb-glow {
+    animation: xt-orb-pulse 3.2s ease-in-out infinite;
+    will-change: filter;
+  }
+
   @keyframes xt-cal-open-pulse {
     0%,100% { box-shadow: 0 0 0 1px rgba(255,182,39,0.30), 0 0 6px rgba(255,182,39,0.15); }
     50%      { box-shadow: 0 0 0 2px rgba(255,182,39,0.60), 0 0 14px rgba(255,182,39,0.30); }
@@ -2148,57 +2166,92 @@ const IconAnalytics = ({ color }) => (
    Pattern: cerchio outer + diversi nodi interni distribuiti, varie tonalità.
    Niente colore vivo: solo grigi/bianchi per essere "neutra" come chiesto. */
 const IconAI = () => (
-  <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
+  <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
     <defs>
-      {/* Glow esterno bianco */}
-      <radialGradient id="xt-ai-glow" cx="50%" cy="50%" r="50%">
-        <stop offset="0%"   stopColor="#FFFFFF" stopOpacity="0.18"/>
+      {/* Glow esterno bianco morbido */}
+      <radialGradient id="xt-ai-aura" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   stopColor="#FFFFFF" stopOpacity="0.22"/>
         <stop offset="55%"  stopColor="#FFFFFF" stopOpacity="0.08"/>
         <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0"/>
       </radialGradient>
-      {/* Riempimento interno della sfera (semitrasparente, dà profondità) */}
-      <radialGradient id="xt-ai-inner" cx="45%" cy="40%" r="55%">
-        <stop offset="0%"   stopColor="#FFFFFF" stopOpacity="0.28"/>
-        <stop offset="60%"  stopColor="#FFFFFF" stopOpacity="0.08"/>
-        <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0.02"/>
-      </radialGradient>
     </defs>
-
-    {/* 1. Aura glow esterna */}
-    <circle cx="16" cy="16" r="15" fill="url(#xt-ai-glow)"/>
-
-    {/* 2. Particelle esterne (puntini bianchi che fluttuano attorno alla sfera) */}
-    <circle cx="3.5"  cy="14"   r="0.55" fill="#FFFFFF" opacity="0.8"/>
-    <circle cx="29"   cy="11"   r="0.45" fill="#FFFFFF" opacity="0.7"/>
-    <circle cx="27.5" cy="22"   r="0.55" fill="#FFFFFF" opacity="0.85"/>
-    <circle cx="4.5"  cy="23"   r="0.4"  fill="#FFFFFF" opacity="0.65"/>
-    <circle cx="16"   cy="2"    r="0.5"  fill="#FFFFFF" opacity="0.8"/>
-    <circle cx="14"   cy="30"   r="0.45" fill="#FFFFFF" opacity="0.7"/>
-    <circle cx="25"   cy="4.5"  r="0.4"  fill="#FFFFFF" opacity="0.65"/>
-    <circle cx="7"    cy="6.5"  r="0.45" fill="#FFFFFF" opacity="0.75"/>
-    <circle cx="21"   cy="28"   r="0.4"  fill="#FFFFFF" opacity="0.6"/>
-    <circle cx="9"    cy="27"   r="0.35" fill="#FFFFFF" opacity="0.55"/>
-
-    {/* 3. Anello bordo della sfera (wireframe bianco brillante) */}
-    <circle cx="16" cy="16" r="11" stroke="#FFFFFF" strokeWidth="1.4" strokeOpacity="0.95"/>
-
-    {/* 4. Riempimento interno della sfera (semitrasparente) */}
-    <circle cx="16" cy="16" r="10.3" fill="url(#xt-ai-inner)"/>
-
-    {/* 5. Particelle interne (puntini bianchi sparsi dentro la sfera) */}
-    <circle cx="11.5" cy="11"   r="0.65" fill="#FFFFFF" opacity="0.95"/>
-    <circle cx="19"   cy="9.5"  r="0.55" fill="#FFFFFF" opacity="0.85"/>
-    <circle cx="20.5" cy="14"   r="0.5"  fill="#FFFFFF" opacity="0.8"/>
-    <circle cx="13"   cy="18.5" r="0.6"  fill="#FFFFFF" opacity="0.9"/>
-    <circle cx="18.5" cy="20.5" r="0.5"  fill="#FFFFFF" opacity="0.8"/>
-    <circle cx="16"   cy="15"   r="0.45" fill="#FFFFFF" opacity="0.75"/>
-    <circle cx="22"   cy="17.5" r="0.4"  fill="#FFFFFF" opacity="0.7"/>
-    <circle cx="10.5" cy="15.5" r="0.4"  fill="#FFFFFF" opacity="0.7"/>
-    <circle cx="15"   cy="22"   r="0.45" fill="#FFFFFF" opacity="0.78"/>
-
-    {/* 6. Highlight superiore sinistro (riflesso) */}
-    <ellipse cx="12.5" cy="10" rx="3" ry="1.6" fill="#FFFFFF" opacity="0.22"
-             transform="rotate(-22 12.5 10)"/>
+    {/* Aura morbida (sotto i punti) */}
+    <circle cx="16" cy="16" r="15.5" fill="url(#xt-ai-aura)"/>
+    {/* Sfera di particelle — molti puntini bianchi distribuiti */}
+    <circle cx="14.84" cy="14.6" r="0.49" fill="#FFFFFF" opacity="0.65"/>
+    <circle cx="15.2" cy="6.57" r="0.8" fill="#FFFFFF" opacity="0.59"/>
+    <circle cx="14.25" cy="16.94" r="0.46" fill="#FFFFFF" opacity="0.77"/>
+    <circle cx="21.06" cy="16.85" r="0.67" fill="#FFFFFF" opacity="0.78"/>
+    <circle cx="17.63" cy="24.68" r="0.75" fill="#FFFFFF" opacity="0.55"/>
+    <circle cx="19.3" cy="6.98" r="0.52" fill="#FFFFFF" opacity="0.62"/>
+    <circle cx="22.43" cy="14.23" r="0.4" fill="#FFFFFF" opacity="0.59"/>
+    <circle cx="21.14" cy="8.69" r="0.75" fill="#FFFFFF" opacity="0.86"/>
+    <circle cx="4.95" cy="13.44" r="0.54" fill="#FFFFFF" opacity="0.79"/>
+    <circle cx="20.33" cy="8.06" r="0.78" fill="#FFFFFF" opacity="0.8"/>
+    <circle cx="15.31" cy="13.64" r="0.46" fill="#FFFFFF" opacity="0.67"/>
+    <circle cx="20.87" cy="18.67" r="0.4" fill="#FFFFFF" opacity="0.67"/>
+    <circle cx="11.43" cy="10.77" r="0.54" fill="#FFFFFF" opacity="0.64"/>
+    <circle cx="14.81" cy="27.07" r="0.67" fill="#FFFFFF" opacity="0.81"/>
+    <circle cx="20.67" cy="24.64" r="0.43" fill="#FFFFFF" opacity="0.71"/>
+    <circle cx="25.18" cy="15.39" r="0.63" fill="#FFFFFF" opacity="0.84"/>
+    <circle cx="21.58" cy="7.55" r="0.46" fill="#FFFFFF" opacity="0.56"/>
+    <circle cx="13.62" cy="21.45" r="0.46" fill="#FFFFFF" opacity="0.96"/>
+    <circle cx="20.6" cy="11.48" r="0.68" fill="#FFFFFF" opacity="0.72"/>
+    <circle cx="22.69" cy="12.02" r="0.48" fill="#FFFFFF" opacity="0.66"/>
+    <circle cx="10.54" cy="13.78" r="0.64" fill="#FFFFFF" opacity="0.94"/>
+    <circle cx="11.65" cy="19.18" r="0.85" fill="#FFFFFF" opacity="0.77"/>
+    <circle cx="18.1" cy="17.35" r="0.4" fill="#FFFFFF" opacity="0.82"/>
+    <circle cx="17.95" cy="8.79" r="0.38" fill="#FFFFFF" opacity="0.71"/>
+    <circle cx="24.36" cy="15.8" r="0.84" fill="#FFFFFF" opacity="0.92"/>
+    <circle cx="25.74" cy="16.7" r="0.69" fill="#FFFFFF" opacity="0.78"/>
+    <circle cx="15.03" cy="25.16" r="0.41" fill="#FFFFFF" opacity="0.74"/>
+    <circle cx="5.24" cy="19.22" r="0.79" fill="#FFFFFF" opacity="0.66"/>
+    <circle cx="11.14" cy="15.98" r="0.81" fill="#FFFFFF" opacity="0.92"/>
+    <circle cx="13.24" cy="24.77" r="0.65" fill="#FFFFFF" opacity="0.62"/>
+    <circle cx="16.66" cy="7.58" r="0.74" fill="#FFFFFF" opacity="0.78"/>
+    <circle cx="22.55" cy="16.02" r="0.36" fill="#FFFFFF" opacity="0.95"/>
+    <circle cx="23.59" cy="8.76" r="0.5" fill="#FFFFFF" opacity="0.57"/>
+    <circle cx="24.06" cy="8.24" r="0.39" fill="#FFFFFF" opacity="0.76"/>
+    <circle cx="25.1" cy="20.23" r="0.73" fill="#FFFFFF" opacity="0.61"/>
+    <circle cx="7.58" cy="17.32" r="0.48" fill="#FFFFFF" opacity="0.93"/>
+    <circle cx="26.88" cy="15.87" r="0.43" fill="#FFFFFF" opacity="0.81"/>
+    <circle cx="26.81" cy="18.35" r="0.55" fill="#FFFFFF" opacity="0.77"/>
+    <circle cx="25.96" cy="21.62" r="0.33" fill="#FFFFFF" opacity="0.59"/>
+    <circle cx="24.38" cy="23.96" r="0.36" fill="#FFFFFF" opacity="0.59"/>
+    <circle cx="22.5" cy="25.65" r="0.36" fill="#FFFFFF" opacity="0.88"/>
+    <circle cx="18.16" cy="26.41" r="0.36" fill="#FFFFFF" opacity="0.78"/>
+    <circle cx="16.49" cy="26.73" r="0.53" fill="#FFFFFF" opacity="0.74"/>
+    <circle cx="12.97" cy="27.52" r="0.5" fill="#FFFFFF" opacity="0.58"/>
+    <circle cx="11.0" cy="26.11" r="0.41" fill="#FFFFFF" opacity="0.7"/>
+    <circle cx="7.42" cy="23.97" r="0.55" fill="#FFFFFF" opacity="0.54"/>
+    <circle cx="6.47" cy="21.7" r="0.52" fill="#FFFFFF" opacity="0.6"/>
+    <circle cx="5.24" cy="19.46" r="0.41" fill="#FFFFFF" opacity="0.62"/>
+    <circle cx="3.85" cy="16.49" r="0.41" fill="#FFFFFF" opacity="0.86"/>
+    <circle cx="5.79" cy="13.18" r="0.55" fill="#FFFFFF" opacity="0.85"/>
+    <circle cx="5.95" cy="9.14" r="0.51" fill="#FFFFFF" opacity="0.57"/>
+    <circle cx="8.29" cy="8.32" r="0.4" fill="#FFFFFF" opacity="0.52"/>
+    <circle cx="9.66" cy="5.49" r="0.37" fill="#FFFFFF" opacity="0.83"/>
+    <circle cx="13.01" cy="5.14" r="0.54" fill="#FFFFFF" opacity="0.92"/>
+    <circle cx="16.11" cy="4.21" r="0.34" fill="#FFFFFF" opacity="0.62"/>
+    <circle cx="19.81" cy="5.11" r="0.44" fill="#FFFFFF" opacity="0.81"/>
+    <circle cx="21.05" cy="5.61" r="0.43" fill="#FFFFFF" opacity="0.86"/>
+    <circle cx="24.16" cy="6.89" r="0.32" fill="#FFFFFF" opacity="0.58"/>
+    <circle cx="26.23" cy="10.3" r="0.36" fill="#FFFFFF" opacity="0.55"/>
+    <circle cx="26.73" cy="13.83" r="0.45" fill="#FFFFFF" opacity="0.76"/>
+    <circle cx="3.59" cy="22.9" r="0.38" fill="#FFFFFF" opacity="0.73"/>
+    <circle cx="20.12" cy="29.92" r="0.31" fill="#FFFFFF" opacity="0.54"/>
+    <circle cx="9.61" cy="4.08" r="0.33" fill="#FFFFFF" opacity="0.66"/>
+    <circle cx="28.48" cy="22.12" r="0.5" fill="#FFFFFF" opacity="0.75"/>
+    <circle cx="27.93" cy="21.91" r="0.32" fill="#FFFFFF" opacity="0.73"/>
+    <circle cx="26.92" cy="5.85" r="0.34" fill="#FFFFFF" opacity="0.46"/>
+    <circle cx="23.28" cy="3.47" r="0.4" fill="#FFFFFF" opacity="0.75"/>
+    <circle cx="8.73" cy="5.44" r="0.45" fill="#FFFFFF" opacity="0.5"/>
+    <circle cx="8.21" cy="3.12" r="0.28" fill="#FFFFFF" opacity="0.44"/>
+    <circle cx="27.05" cy="24.8" r="0.32" fill="#FFFFFF" opacity="0.61"/>
+    <circle cx="13.31" cy="2.99" r="0.41" fill="#FFFFFF" opacity="0.49"/>
+    <circle cx="1.07" cy="17.08" r="0.46" fill="#FFFFFF" opacity="0.43"/>
+    <circle cx="4.06" cy="22.22" r="0.25" fill="#FFFFFF" opacity="0.67"/>
+    <circle cx="7.25" cy="5.81" r="0.44" fill="#FFFFFF" opacity="0.59"/>
   </svg>
 );
 
@@ -4079,7 +4132,7 @@ const AIView = ({ C, trades, equity, settings, activeAccount, currentTab }) => {
     <div style={{
       /* Container full height del pager — l'input resta sempre in fondo, mai coperto dalla tab bar */
       display: 'flex', flexDirection: 'column',
-      height: 'calc(100dvh - 184px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))',
+      height: 'calc(100dvh - 128px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))',
       minHeight: 400,
       gap: 12,
     }}>
@@ -5626,20 +5679,19 @@ export default function TradingApp() {
                       }}>
                 <div className="xt-tab-icon">
                   {isAI ? (
-                    /* AI: orb Jarvis-style — più grande delle altre (38 vs 32) per essere in evidenza,
-                       NO gradient di sfondo, NO pill bg, glow bianco morbido attorno */
-                    <div style={{
-                      width: 38, height: 38, borderRadius: 14,
+                    /* AI: orb sfera di particelle — 44px (12px più delle altre 32) per essere ben in evidenza.
+                       NO gradient bg, NO pill bg. Rotazione lenta + pulsazione glow bianco. */
+                    <div className="xt-orb-glow" style={{
+                      width: 44, height: 44, borderRadius: 16,
                       background: 'transparent',
                       display:'flex', alignItems:'center', justifyContent:'center',
-                      transform: active ? 'scale(1.05)' : 'scale(1)',
+                      transform: active ? 'scale(1.04)' : 'scale(1)',
                       transition:'transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                      filter: active
-                        ? 'drop-shadow(0 0 8px rgba(255,255,255,0.45)) drop-shadow(0 0 2px rgba(255,255,255,0.7))'
-                        : 'drop-shadow(0 0 4px rgba(255,255,255,0.18))',
                       flexShrink: 0,
                     }}>
-                      <Icon/>
+                      <div className="xt-orb-animated" style={{display:'flex'}}>
+                        <Icon/>
+                      </div>
                     </div>
                   ) : Icon && grad ? (
                     <AppIcon gradient={grad} active={active} size={32}>
