@@ -4414,16 +4414,38 @@ const AIView = ({ C, trades, equity, settings, activeAccount, currentTab, setAiT
     setAiThinking?.(true);
     haptic.light();
 
-    try {
+    const MAX_RETRIES = 3;
+    const BASE_DELAY_MS = 2000;
+
+    const attemptFetch = async (attempt) => {
       const ctx = buildContext();
       const r = await fetch('/api/coach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: newMessages, context: ctx }),
       });
+
+      // 429 Too Many Requests — attendi e riprova con backoff esponenziale
+      if (r.status === 429 && attempt < MAX_RETRIES) {
+        const retryAfter = parseInt(r.headers.get('Retry-After') || '0', 10) * 1000;
+        const delay = retryAfter > 0 ? retryAfter : BASE_DELAY_MS * Math.pow(2, attempt - 1);
+        await new Promise(res => setTimeout(res, delay));
+        return attemptFetch(attempt + 1);
+      }
+
+      return r;
+    };
+
+    try {
+      const r = await attemptFetch(1);
       const data = await r.json();
-      if (!r.ok) { setError(data.error || `Errore ${r.status}`); haptic.error(); }
-      else {
+      if (!r.ok) {
+        const msg = r.status === 429
+          ? 'Limite richieste raggiunto (429) — riprova tra qualche minuto.'
+          : (data.error || `Errore ${r.status}`);
+        setError(msg);
+        haptic.error();
+      } else {
         setMessages([...newMessages, { role: 'assistant', content: data.text }]);
         haptic.success();
       }
@@ -4472,7 +4494,8 @@ const AIView = ({ C, trades, equity, settings, activeAccount, currentTab, setAiT
       {/* MESSAGGI — flex:1, occupa tutto lo spazio disponibile, scrolla solo internamente */}
       <div ref={scrollRef} style={{
         flex: 1, minHeight: 0,
-        overflowY: 'auto', overflowX: 'hidden',
+        overflowY: messages.length > 0 ? 'auto' : 'hidden',
+        overflowX: 'hidden',
         WebkitOverflowScrolling: 'touch', padding: '4px 2px',
       }}>
         {messages.length === 0 && (
@@ -5982,7 +6005,10 @@ export default function TradingApp() {
                        - thinking (AI sta elaborando): espansione rapida 1.1s + glow forte 1.3s */
                     <div className={`xt-orb-glow ${aiThinking ? 'xt-orb-thinking' : ''}`} style={{
                       width: 32, height: 32, borderRadius: 10,
-                      background: 'transparent',
+                      background: 'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.18) 0%, rgba(200,200,255,0.10) 60%, transparent 100%)',
+                      boxShadow: active
+                        ? '0 0 10px 2px rgba(255,255,255,0.18), 0 0 4px 1px rgba(180,180,255,0.12)'
+                        : '0 0 6px 1px rgba(255,255,255,0.10)',
                       display:'flex', alignItems:'center', justifyContent:'center',
                       transform: active ? 'scale(1.04)' : 'scale(1)',
                       transition:'transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1)',
