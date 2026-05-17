@@ -4076,9 +4076,15 @@ const AIView = ({ C, trades, equity, settings, activeAccount, currentTab }) => {
   ];
 
   return (
-    <div className="space-y-4">
-      {/* HEADER */}
-      <div className="flex items-center justify-between flex-wrap gap-3 px-1">
+    <div style={{
+      /* Container full height del pager — l'input resta sempre in fondo, mai coperto dalla tab bar */
+      display: 'flex', flexDirection: 'column',
+      height: 'calc(100dvh - 184px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))',
+      minHeight: 400,
+      gap: 12,
+    }}>
+      {/* HEADER fisso in alto, non scrolla con i messaggi */}
+      <div className="flex items-center justify-between flex-wrap gap-3 px-1" style={{flexShrink:0}}>
         <div className="flex items-center gap-3">
           <div style={{
             width: 38, height: 38, borderRadius: 13,
@@ -4108,9 +4114,9 @@ const AIView = ({ C, trades, equity, settings, activeAccount, currentTab }) => {
         )}
       </div>
 
-      {/* MESSAGGI */}
+      {/* MESSAGGI — flex:1, occupa tutto lo spazio disponibile, scrolla solo internamente */}
       <div ref={scrollRef} style={{
-        minHeight: 280, maxHeight: 'calc(100dvh - 360px)',
+        flex: 1, minHeight: 0,
         overflowY: 'auto', overflowX: 'hidden',
         WebkitOverflowScrolling: 'touch', padding: '4px 2px',
       }}>
@@ -4205,50 +4211,51 @@ const AIView = ({ C, trades, equity, settings, activeAccount, currentTab }) => {
         )}
       </div>
 
-      {/* INPUT */}
-      <div style={{
-        display: 'flex', alignItems: 'flex-end', gap: 8,
-        background: C.glass, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-        border: `0.5px solid ${C.sep2}`,
-        borderRadius: 24, padding: '6px 6px 6px 14px',
-      }}>
-        <textarea
-          ref={inputRef}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-          }}
-          placeholder="Chiedi qualcosa sui tuoi dati..."
-          rows={1}
-          style={{
-            flex: 1, background: 'transparent', border: 'none', outline: 'none',
-            color: C.primary, fontSize: 14, fontFamily: FONT.text,
-            resize: 'none', padding: '8px 0', maxHeight: 120,
-            letterSpacing: '-0.1px', lineHeight: 1.4,
-          }}
-        />
-        <button onClick={send} disabled={loading || !input.trim()} className="xt-btn" style={{
-          width: 36, height: 36, borderRadius: 18,
-          background: !input.trim() || loading ? C.glass3 : C.primary,
-          border: 'none', cursor: !input.trim() || loading ? 'default' : 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0, transition: 'all 0.2s',
+      {/* INPUT — fisso in fondo al container, sopra la tab bar */}
+      <div style={{flexShrink:0}}>
+        <div style={{
+          display: 'flex', alignItems: 'flex-end', gap: 8,
+          background: C.glass, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+          border: `0.5px solid ${C.sep2}`,
+          borderRadius: 24, padding: '6px 6px 6px 14px',
         }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-            <path d="M5 12h14M13 5l7 7-7 7"
-              stroke={!input.trim() || loading ? C.tertiary : C.bg}
-              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </button>
-      </div>
-
-      <div style={{
-        color: C.tertiary, fontSize: 10, fontFamily: FONT.mono,
-        textAlign: 'center', padding: '0 4px', lineHeight: 1.5,
-      }}>
-        L'AI è solo descrittiva — analizza i tuoi dati e descrive pattern.<br/>
-        Non dà consigli operativi né previsioni di mercato.
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+            }}
+            placeholder="Chiedi qualcosa sui tuoi dati..."
+            rows={1}
+            style={{
+              flex: 1, background: 'transparent', border: 'none', outline: 'none',
+              color: C.primary, fontSize: 14, fontFamily: FONT.text,
+              resize: 'none', padding: '8px 0', maxHeight: 120,
+              letterSpacing: '-0.1px', lineHeight: 1.4,
+            }}
+          />
+          <button onClick={send} disabled={loading || !input.trim()} className="xt-btn" style={{
+            width: 36, height: 36, borderRadius: 18,
+            background: !input.trim() || loading ? C.glass3 : C.primary,
+            border: 'none', cursor: !input.trim() || loading ? 'default' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0, transition: 'all 0.2s',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path d="M5 12h14M13 5l7 7-7 7"
+                stroke={!input.trim() || loading ? C.tertiary : C.bg}
+                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div style={{
+          color: C.tertiary, fontSize: 9, fontFamily: FONT.mono,
+          textAlign: 'center', padding: '6px 4px 0', lineHeight: 1.4,
+          opacity: 0.7,
+        }}>
+          AI solo descrittiva — descrive pattern dai tuoi dati, non dà consigli operativi.
+        </div>
       </div>
     </div>
   );
