@@ -6009,11 +6009,11 @@ export default function TradingApp() {
                        - press (tap): pop espansivo 0.45s
                        - thinking (AI sta elaborando): espansione rapida 1.1s + glow forte 1.3s */
                     <div className={`xt-orb-glow ${aiThinking ? 'xt-orb-thinking' : ''}`} style={{
-                      width: 32, height: 32, borderRadius: 10,
-                      background: 'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.05) 0%, rgba(200,200,255,0.03) 60%, transparent 100%)',
+                      width: 32, height: 32, borderRadius: '50%',
+                      background: 'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.015) 0%, transparent 70%)',
                       boxShadow: active
-                        ? '0 0 5px 1px rgba(255,255,255,0.06), 0 0 2px 1px rgba(180,180,255,0.04)'
-                        : '0 0 3px 1px rgba(255,255,255,0.03)',
+                        ? '0 0 4px 1px rgba(255,255,255,0.03)'
+                        : 'none',
                       display:'flex', alignItems:'center', justifyContent:'center',
                       transform: active ? 'scale(1.04)' : 'scale(1)',
                       transition:'transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1)',
