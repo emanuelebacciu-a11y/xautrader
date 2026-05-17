@@ -6026,17 +6026,22 @@ export default function TradingApp() {
                        - thinking (AI sta elaborando): espansione rapida 1.1s + glow forte 1.3s */
                     <div className={`xt-orb-glow ${aiThinking ? 'xt-orb-thinking' : ''}`} style={{
                       width: 32, height: 32, borderRadius: '50%',
-                      background: 'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.015) 0%, transparent 70%)',
+                      background: scheme === 'dark'
+                        ? 'radial-gradient(circle at 50% 50%, rgba(255,255,255,0.015) 0%, transparent 70%)'
+                        : 'radial-gradient(circle at 50% 50%, rgba(0,0,0,0.04) 0%, transparent 70%)',
                       boxShadow: active
-                        ? '0 0 4px 1px rgba(255,255,255,0.03)'
+                        ? (scheme === 'dark' ? '0 0 4px 1px rgba(255,255,255,0.03)' : '0 0 4px 1px rgba(0,0,0,0.04)')
                         : 'none',
                       display:'flex', alignItems:'center', justifyContent:'center',
                       transform: active ? 'scale(1.04)' : 'scale(1)',
                       transition:'transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1)',
                       flexShrink: 0,
+                      // In light mode i puntini con opacity<1 diventano grigi su sfondo bianco.
+                      // Boost contrasto + scurire per renderli nero pieno e ben visibili
+                      filter: scheme === 'dark' ? 'none' : 'contrast(1.7) brightness(0.4)',
                     }}>
                       <div className="xt-orb-animated" style={{display:'flex'}}>
-                        <Icon color={scheme === 'dark' ? '#FFFFFF' : '#1C1C1E'}/>
+                        <Icon color={scheme === 'dark' ? '#FFFFFF' : '#000000'}/>
                       </div>
                     </div>
                   ) : Icon && grad ? (
