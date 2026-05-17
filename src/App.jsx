@@ -4357,231 +4357,156 @@ const AnalyticsView = ({ C, trades }) => {
 };
 
 /* ============= CHART VIEW ============= */
-// Prezzo spot XAU/USD — cascata no-auth: fxratesapi → currency-api → stima dinamica
-// Candele sintetiche intraday costruite con simulazione stocastica calibrata su XAUUSD:
-//   - Volatilità: σ giornaliera ~0.7% (ATR storico ~$21 su ~$3000)
-//   - Modello: mean-reversion Ornstein-Uhlenbeck + shock asimmetrici
-//   - Spread tipico XAUUSD: 0.20-0.40 pts su broker ECN
-//   - Wicks calibrati su ATR frazioni reali (body ~40%, shadow ~30% each side)
-// Daily e multi-day: stessa simulazione su finestra più lunga con drift storico
+// Dati OHLC reali XAU/USD da TwelveData (chiave utente, CORS aperto dal browser)
+// Simbolo: XAU/USD  |  exchange: non necessario (forex pair nativo)
+// Docs: https://twelvedata.com/docs#time-series
+//
+// TF nativi TwelveData: 1min 5min 15min 30min 45min 1h 2h 4h 8h 1day 1week 1month
+// TF personalizzati (3m,7m,13m,17m,33m,90m,3D) → aggregazione client-side
+// da resolution più fine:
+//   3m  = 3×1min    7m  = 7×1min    13m = 13×1min   17m = 17×1min
+//   33m = 33×1min   90m = 3×30min   3h  = 3×1h      6h  = 6×1h
+//   1D  = native 1day               3D  = 3×1day
+//
+// Prezzo spot (ultima candela close) = dato reale dall'API, non simulato.
 
 const CHART_TF_OPTIONS = ['3m','7m','13m','17m','33m','90m','3h','6h','1D','3D'];
 const CHART_TF_LABELS  = {'3m':'M3','7m':'M7','13m':'M13','17m':'M17','33m':'M33','90m':'M90','3h':'H3','6h':'H6','1D':'D1','3D':'3D'};
 
-// ── Spot price XAU/USD — cascata verificata no-auth ───────────────────────
-// Sorgenti verificate con supporto nativo XAU/USD, no key richiesta.
-// Sorgenti verificate che supportano XAU/USD nativamente:
-//
-// Fonte 1: fxratesapi.com — free, no key, CORS ok, XAU supportato come base
-//          GET /latest?base=XAU&currencies=USD → rates.USD = prezzo spot oz
-//
-// Fonte 2: Frankfurter ECB — non ha XAU, skip.
-//          Alternativa: cdn.jsdelivr.net/npm/@fawazahmed0/currency-api
-//          → free, GitHub-hosted, aggiornato daily, include XAU
-//          GET /latest/v1/currencies/xau.json → xau.usd = prezzo
-//
-// Fonte 3: Stima dinamica calibrata su range reale maggio 2026 ($4500-$5200)
-//          Non è il prezzo reale ma è nell'ordine di grandezza corretto.
+const TD_KEY = 'd2496490923349bcb89e39da55c76f58';
+const TD_BASE = 'https://api.twelvedata.com';
+const TD_SYMBOL = 'XAU/USD';
 
-const _xauFallbackEstimate = () => {
-  // Range reale XAU/USD maggio 2026: ~$4800-5200
-  // Usa oscillazione deterministica su ora UTC per variare realisticamente
-  const base = 4950;
-  const h   = new Date().getUTCHours() + new Date().getUTCMinutes() / 60;
-  const doy = Math.floor((Date.now() - new Date(new Date().getUTCFullYear(), 0, 0)) / 86400000);
-  const intraday = Math.sin((h - 6) * Math.PI / 12) * 130;
-  const dayNoise = Math.sin(doy * 0.37) * 100 + Math.cos(doy * 0.19) * 60;
-  return Math.round((base + intraday + dayNoise) * 100) / 100;
+// Mapping TF app → { resolution TwelveData, aggregazione N, outputsize }
+// outputsize: numero di barre da chiedere a TD (dopo aggregazione = outputsize/N)
+const TF_TD = {
+  '3m':  { res: '1min',  aggN: 3,  outputsize: 360  }, // ~120 barre finali
+  '7m':  { res: '1min',  aggN: 7,  outputsize: 700  }, // ~100 barre finali
+  '13m': { res: '1min',  aggN: 13, outputsize: 1170 }, // ~90 barre finali
+  '17m': { res: '1min',  aggN: 17, outputsize: 1360 }, // ~80 barre finali
+  '33m': { res: '1min',  aggN: 33, outputsize: 2310 }, // ~70 barre finali — usa 5min se quota lo richiede
+  '90m': { res: '30min', aggN: 3,  outputsize: 180  }, // ~60 barre finali
+  '3h':  { res: '1h',    aggN: 3,  outputsize: 150  }, // ~50 barre finali
+  '6h':  { res: '1h',    aggN: 6,  outputsize: 240  }, // ~40 barre finali
+  '1D':  { res: '1day',  aggN: 1,  outputsize: 180  }, // 180 daily
+  '3D':  { res: '1day',  aggN: 3,  outputsize: 360  }, // ~120 barre finali
 };
 
-const _srcFxRatesApi = async () => {
-  // fxratesapi.com: supporta XAU come base, free, CORS aperto
-  // Risposta: { success: true, base: "XAU", rates: { USD: 4923.45, ... } }
-  const res = await fetch(
-    'https://api.fxratesapi.com/latest?base=XAU&currencies=USD&resolution=1m&amount=1&places=2&format=json',
-    { mode: 'cors', signal: AbortSignal.timeout(8000) }
-  );
-  if (!res.ok) throw new Error(`fxratesapi HTTP ${res.status}`);
-  const json = await res.json();
-  const price = json?.rates?.USD;
-  if (!price || !isFinite(price) || price < 1500 || price > 50000)
-    throw new Error(`fxratesapi: valore fuori range (${price})`);
-  const prevClose = price * (1 - 0.0008);
-  return { price, prevClose, ch: price - prevClose, chp: 0.08, timestamp: Math.floor(Date.now() / 1000), source: 'fxratesapi' };
+// TwelveData ritorna timestamps come stringhe ISO "2026-05-17 14:32:00"
+// Per intraday LW Charts vuole unix seconds (int), per daily 'YYYY-MM-DD'
+const tdTimeParse = (str, isDaily) => {
+  if (!str) return null;
+  if (isDaily) return str.slice(0, 10); // 'YYYY-MM-DD'
+  // "2026-05-17 14:32:00" → unix seconds UTC
+  // TwelveData ritorna l'orario già in UTC per forex
+  const ms = new Date(str.replace(' ', 'T') + 'Z').getTime();
+  return isFinite(ms) ? Math.trunc(ms / 1000) : null;
 };
 
-const _srcCurrencyApi = async () => {
-  // @fawazahmed0/currency-api: GitHub CDN, aggiornato daily, CORS ok
-  // Risposta: { date: "2026-05-17", xau: { usd: 4923.45, ... } }
-  const today = new Date().toISOString().slice(0, 10);
-  const res = await fetch(
-    `https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${today}/v1/currencies/xau.json`,
-    { mode: 'cors', signal: AbortSignal.timeout(8000) }
-  );
-  if (!res.ok) throw new Error(`currency-api HTTP ${res.status}`);
-  const json = await res.json();
-  const price = json?.xau?.usd;
-  if (!price || !isFinite(price) || price < 1500 || price > 50000)
-    throw new Error(`currency-api: valore fuori range (${price})`);
-  const prevClose = price * (1 - 0.0008);
-  return { price, prevClose, ch: price - prevClose, chp: 0.08, timestamp: Math.floor(Date.now() / 1000), source: 'currency-api' };
+// Aggrega N candele consecutive in una sola (per TF personalizzati)
+const aggregateBars = (bars, n) => {
+  if (n <= 1) return bars;
+  const out = [];
+  // TwelveData ritorna le barre in ordine cronologico inverso (newest first)
+  // Le riceviamo già invertite (oldest first) dopo il parse
+  for (let i = 0; i + n <= bars.length; i += n) {
+    const slice = bars.slice(i, i + n);
+    out.push({
+      time:  slice[0].time,
+      open:  slice[0].open,
+      high:  Math.max(...slice.map(b => b.high)),
+      low:   Math.min(...slice.map(b => b.low)),
+      close: slice[slice.length - 1].close,
+    });
+  }
+  return out;
 };
 
-const _srcFallback = () => {
-  const price = _xauFallbackEstimate();
-  console.warn(`[Chart] tutte le API fallite — stima dinamica XAU: $${price}`);
-  return { price, prevClose: price * 0.9992, ch: 0, chp: 0, timestamp: Math.floor(Date.now() / 1000), source: 'estimate' };
-};
+// Cache per TF → { bars, ts } per evitare chiamate ridondanti
+const _tdCache = {};
+const TD_TTL_MS = 60_000; // 60s — ricarica al massimo ogni minuto
 
-let _spotCache   = null;
-let _spotCacheTs = 0;
-const SPOT_TTL_MS = 60_000;
-
-const fetchGoldSpot = async () => {
+const fetchChartData = async (tf) => {
   const now = Date.now();
-  if (_spotCache && (now - _spotCacheTs) < SPOT_TTL_MS) return _spotCache;
-
-  for (const src of [_srcFxRatesApi, _srcCurrencyApi]) {
-    try {
-      const data = await src();
-      if (data?.price > 1500) {
-        _spotCache = data; _spotCacheTs = now;
-        console.log(`[Chart] XAU/USD spot: $${data.price} [${data.source}]`);
-        return data;
-      }
-    } catch (e) {
-      console.warn(`[Chart] spot source fail:`, e.message);
-    }
+  if (_tdCache[tf] && (now - _tdCache[tf].ts) < TD_TTL_MS) {
+    return _tdCache[tf].data;
   }
-  const data = _srcFallback();
-  _spotCache = data; _spotCacheTs = now;
-  return data;
-};
 
-// ── Parametri XAUUSD calibrati su range reale maggio 2026 ($4800-5200) ────
-// σ giornaliera ≈ 0.65% → σ assoluta ~$31 su $4800 (ATR14 ≈ $32-38)
-// Mean-reversion intraday su sessioni: θ = 0.018 per candela
-// Drift giornaliero medio ≈ +0.03% (trend rialzista 2024-2026)
-const XAUUSD_PARAMS = {
-  sigmaDailyPct:  0.0065,   // 0.65% σ giornaliera (calibrata su 2024-2026)
-  theta:          0.018,    // mean-reversion per candela
-  driftDaily:     0.0003,   // +0.03%/day
-  wickRatioPct:   0.28,     // wicks = 28% σ_candle ciascuno
-  jumpProb:       0.012,    // 1.2% prob shock per candela
-  jumpSigmaFactor:3.5,      // ampiezza shock
-};
+  const { res, aggN, outputsize } = TF_TD[tf];
+  const isDaily = res === '1day' || res === '1week';
 
-const buildSyntheticBars = (tf, spotData) => {
-  const { price: spotPrice, prevClose, timestamp: spotTs } = spotData;
+  // TwelveData /time_series endpoint
+  // CORS aperto dal browser con qualsiasi origine
+  const url = new URL(`${TD_BASE}/time_series`);
+  url.searchParams.set('symbol',     TD_SYMBOL);
+  url.searchParams.set('interval',   res);
+  url.searchParams.set('outputsize', String(outputsize));
+  url.searchParams.set('apikey',     TD_KEY);
+  url.searchParams.set('format',     'JSON');
+  // Per 33m che usa 1min: riduci a 5min se outputsize > 5000 (limite piano gratuito)
+  // Piano free: 800 req/day, 8 req/min. outputsize max 5000.
+  // 33m con 2310 barre 1min → ok (< 5000)
 
-  const TF_CONFIG = {
-    '3m':  { minutes:   3, totalBars: 120, isDaily: false },
-    '7m':  { minutes:   7, totalBars: 100, isDaily: false },
-    '13m': { minutes:  13, totalBars:  90, isDaily: false },
-    '17m': { minutes:  17, totalBars:  80, isDaily: false },
-    '33m': { minutes:  33, totalBars:  70, isDaily: false },
-    '90m': { minutes:  90, totalBars:  60, isDaily: false },
-    '3h':  { minutes: 180, totalBars:  50, isDaily: false },
-    '6h':  { minutes: 360, totalBars:  40, isDaily: false },
-    '1D':  { minutes:1440, totalBars: 180, isDaily: true  },
-    '3D':  { minutes:4320, totalBars: 120, isDaily: true  },
-  };
-
-  const cfg = TF_CONFIG[tf] || TF_CONFIG['17m'];
-  const { minutes, totalBars, isDaily } = cfg;
-
-  // σ per candela scalata correttamente da σ giornaliera
-  const sigmaCandlePct = XAUUSD_PARAMS.sigmaDailyPct * Math.sqrt(minutes / 1440);
-  const sigmaCandleAbs = spotPrice * sigmaCandlePct;
-
-  const mu = prevClose || spotPrice;
-
-  // ── Generatore LCG deterministico — seed separato per body e wicks ──────
-  // seed cambia ogni 30min → candele stabili durante la sessione
-  const seedBase = Math.floor(Date.now() / (30 * 60 * 1000));
-
-  const makeLCG = (initSeed) => {
-    let s = initSeed;
-    return () => {
-      // Box-Muller su LCG
-      s = (s * 1664525 + 1013904223) & 0xffffffff;
-      const u1 = Math.max((s >>> 0) / 0xffffffff, 1e-10);
-      s = (s * 1664525 + 1013904223) & 0xffffffff;
-      const u2 = (s >>> 0) / 0xffffffff;
-      return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-    };
-  };
-
-  // Seed separati per body vs wicks → indipendenti
-  const bodyRand = makeLCG(seedBase ^ 0xdeadbeef);
-  const wickRand = makeLCG(seedBase ^ 0xcafebabe);
-
-  // ── Genera chiusure all'indietro dal prezzo spot (OU) ──────────────────
-  const closes = [spotPrice];
-  for (let i = 0; i < totalBars - 1; i++) {
-    const prev = closes[closes.length - 1];
-    const drift   = XAUUSD_PARAMS.driftDaily * (minutes / 1440);
-    const noise   = bodyRand() * sigmaCandleAbs;
-    const jump    = Math.random() < XAUUSD_PARAMS.jumpProb
-      ? bodyRand() * sigmaCandleAbs * XAUUSD_PARAMS.jumpSigmaFactor : 0;
-    const mrForce = -XAUUSD_PARAMS.theta * (prev - mu);
-    const next    = prev - drift - noise - jump + mrForce;
-    closes.push(Math.max(next, spotPrice * 0.5));
-  }
-  closes.reverse();
-
-  // ── Costruisci OHLC ────────────────────────────────────────────────────
-  const nowTs   = spotTs || Math.floor(Date.now() / 1000);
-  const tfSecs  = minutes * 60;
-  const firstTs = nowTs - (totalBars - 1) * tfSecs;
-
-  const toDateStr = (sec) => {
-    const d = new Date(sec * 1000);
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
-  };
-
-  const bars = closes.map((close, i) => {
-    const open    = i === 0 ? (prevClose || close) : closes[i - 1];
-    const bodyHi  = Math.max(open, close);
-    const bodyLo  = Math.min(open, close);
-    const upper   = Math.abs(wickRand()) * sigmaCandleAbs * XAUUSD_PARAMS.wickRatioPct;
-    const lower   = Math.abs(wickRand()) * sigmaCandleAbs * XAUUSD_PARAMS.wickRatioPct;
-    const high    = bodyHi + upper;
-    const low     = bodyLo - lower;
-
-    if (i === closes.length - 1) {
-      // Ultima candela: close = spot reale
-      const t = isDaily ? toDateStr(nowTs) : nowTs;
-      return { time: t, open, high: Math.max(high, spotPrice), low: Math.min(low, spotPrice), close: spotPrice };
-    }
-
-    const ts = firstTs + i * tfSecs;
-    const t  = isDaily ? toDateStr(ts) : ts;
-    return { time: t, open, high, low, close };
+  const resp = await fetch(url.toString(), {
+    mode: 'cors',
+    signal: AbortSignal.timeout(12000),
   });
+  if (!resp.ok) throw new Error(`TwelveData HTTP ${resp.status}`);
 
-  // Deduplicazione + validazione + sort
+  const json = await resp.json();
+
+  // Gestione errori API TwelveData
+  if (json.status === 'error') {
+    throw new Error(`TwelveData: ${json.message || json.code || 'errore sconosciuto'}`);
+  }
+  if (!json.values || !Array.isArray(json.values) || json.values.length === 0) {
+    throw new Error('TwelveData: nessun dato ricevuto (mercato chiuso o quota esaurita)');
+  }
+
+  // Parse: TD ritorna newest-first → invertiamo a oldest-first
   const seen = new Set();
-  return bars
+  const parsed = json.values
+    .map(v => {
+      const time  = tdTimeParse(v.datetime, isDaily);
+      const open  = parseFloat(v.open);
+      const high  = parseFloat(v.high);
+      const low   = parseFloat(v.low);
+      const close = parseFloat(v.close);
+      return { time, open, high, low, close };
+    })
     .filter(b => {
+      if (b.time == null) return false;
       const k = String(b.time);
       if (seen.has(k)) return false;
       seen.add(k);
       return isFinite(b.open) && isFinite(b.high) && isFinite(b.low) && isFinite(b.close)
-        && b.open > 0 && b.close > 0 && b.high >= b.low;
+        && b.open > 0 && b.high >= b.low;
     })
-    .sort((a, b) => typeof a.time === 'string'
-      ? (a.time < b.time ? -1 : a.time > b.time ? 1 : 0)
-      : a.time - b.time
-    );
-};
+    .reverse(); // oldest → newest
 
-// Fetch OHLC: recupera spot reale + costruisce candele sintetiche calibrate
-const fetchChartData = async (tf) => {
-  const spotData = await fetchGoldSpot();
-  const bars = buildSyntheticBars(tf, spotData);
-  if (bars.length === 0) throw new Error('Nessuna barra generata');
-  return { bars, spotData };
+  if (parsed.length === 0) throw new Error('TwelveData: nessuna barra valida dopo il parse');
+
+  // Aggrega se necessario (TF personalizzati)
+  const bars = aggregateBars(parsed, aggN);
+  if (bars.length === 0) throw new Error('TwelveData: aggregazione ha prodotto 0 barre');
+
+  // Estrai spot info dall'ultima barra
+  const last = bars[bars.length - 1];
+  const prev = bars.length > 1 ? bars[bars.length - 2] : null;
+  const ch   = prev ? last.close - prev.close : 0;
+  const chp  = prev && prev.close > 0 ? (ch / prev.close) * 100 : 0;
+  const spotData = {
+    price:     last.close,
+    prevClose: prev?.close ?? last.open,
+    ch,
+    chp,
+    source:    'twelvedata',
+  };
+
+  const result = { bars, spotData };
+  _tdCache[tf] = { data: result, ts: now };
+  console.log(`[Chart] TwelveData XAU/USD ${tf}: ${bars.length} barre, ultimo close $${last.close}`);
+  return result;
 };
 
 // Converte prezzo → pixel Y dentro il chart (area canvas)
@@ -4877,23 +4802,20 @@ const ChartView = ({ C, trades }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lwReady]); // SOLO lwReady — il chart viene creato una volta sola
 
-  // Carica dati: spot reale (fxratesapi → currency-api → stima) + candele sintetiche OU calibrate
+  // Carica dati OHLC reali da TwelveData (XAU/USD) + aggrega per TF personalizzati
   const loadData = useCallback(async (requestedTf) => {
     if (!chartRef.current) return;
     const targetTf = requestedTf || tfRef.current;
     try {
       setError(null);
-      // Aggiorna timeVisible prima di ricaricare
       chartRef.current.applyOptions({
         timeScale: { timeVisible: !['1D','3D'].includes(targetTf) },
       });
-      // RICREA la series — garantisce nessun residuo di tipo timestamp precedente
       const series = createSeries();
       if (!series) return;
       barsRef.current = [];
 
       const { bars, spotData } = await fetchChartData(targetTf);
-      // Controlla che il TF non sia cambiato durante il fetch (race condition)
       if (tfRef.current !== targetTf) return;
       if (!seriesRef.current) return;
 
@@ -4905,9 +4827,9 @@ const ChartView = ({ C, trades }) => {
       drawTrades();
       setLoading(false);
     } catch (err) {
-      console.error('[ChartView] loadData error:', err);
+      console.error('[Chart] loadData error:', err);
       if (tfRef.current !== targetTf) return;
-      setError(`Spot non disponibile — ${err?.message || 'riprova tra poco.'}`);
+      setError(`${err?.message || 'Errore caricamento dati — riprova.'}`);
       setLoading(false);
     }
   }, [createSeries, drawTrades]);
@@ -4917,10 +4839,10 @@ const ChartView = ({ C, trades }) => {
     if (!lwReady || !chartRef.current) return;
     setLoading(true);
     clearInterval(pollRef.current);
-    // Piccolo delay per garantire che il chart sia fully mounted al primo render
     const t = setTimeout(() => {
       loadData(tf);
-      pollRef.current = setInterval(() => loadData(tf), 30_000);
+      // Poll ogni 60s — allineato al TTL cache TwelveData (non spamma l'API)
+      pollRef.current = setInterval(() => loadData(tf), 60_000);
     }, 80);
     return () => {
       clearTimeout(t);
@@ -4947,7 +4869,7 @@ const ChartView = ({ C, trades }) => {
           ))}
         </div>
 
-        {/* Prezzo spot XAU/USD (fxratesapi → currency-api → stima dinamica) */}
+        {/* Prezzo spot XAU/USD reale — TwelveData */}
         <div style={{ display:'flex', alignItems:'center', gap:6 }}>
           {lastPrice && (
             <span style={{ color:'#ffffff', fontSize:13, fontFamily:FONT.mono, fontWeight:700, fontVariantNumeric:'tabular-nums', letterSpacing:'-0.3px' }}>
