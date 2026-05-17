@@ -4380,14 +4380,14 @@ const TD_SYMBOL = 'XAU/USD';
 // Mapping TF app → { resolution TwelveData, aggregazione N, outputsize }
 // Piano free TwelveData: max 5000 barre per chiamata, 800 req/day, 8 req/min.
 const TF_TD = {
-  '3m':  { res: '1min',  aggN: 3,  outputsize: 2400 }, // ~800 barre finali (~2 giorni)
-  '7m':  { res: '1min',  aggN: 7,  outputsize: 3500 }, // ~500 barre finali
-  '13m': { res: '5min',  aggN: 3,  outputsize: 1800 }, // ~600 barre finali (≈15min)
-  '17m': { res: '5min',  aggN: 4,  outputsize: 2000 }, // ~500 barre finali (≈20min)
-  '33m': { res: '15min', aggN: 2,  outputsize: 2000 }, // ~1000 barre finali (≈30min)
-  '90m': { res: '30min', aggN: 3,  outputsize: 1500 }, // ~500 barre finali
-  '3h':  { res: '1h',    aggN: 3,  outputsize: 1500 }, // ~500 barre finali (~60 giorni)
-  '6h':  { res: '1h',    aggN: 6,  outputsize: 3000 }, // ~500 barre finali (~120 giorni)
+  '3m':  { res: '1min',  aggN: 3,  outputsize: 5000 }, // ~1500 barre finali (dopo filtro weekend)
+  '7m':  { res: '1min',  aggN: 7,  outputsize: 5000 }, // ~600 barre finali
+  '13m': { res: '5min',  aggN: 3,  outputsize: 2400 }, // ~700 barre finali (≈15min)
+  '17m': { res: '5min',  aggN: 4,  outputsize: 2400 }, // ~550 barre finali (≈20min)
+  '33m': { res: '15min', aggN: 2,  outputsize: 2000 }, // ~900 barre finali (≈30min)
+  '90m': { res: '30min', aggN: 3,  outputsize: 1500 }, // ~450 barre finali
+  '3h':  { res: '1h',    aggN: 3,  outputsize: 1500 }, // ~450 barre finali (~60 giorni)
+  '6h':  { res: '1h',    aggN: 6,  outputsize: 3000 }, // ~450 barre finali (~120 giorni)
   '1D':  { res: '1day',  aggN: 1,  outputsize: 500  }, // 500 daily (~2 anni)
   '3D':  { res: '1day',  aggN: 3,  outputsize: 1500 }, // ~500 barre finali
 };
@@ -4396,14 +4396,17 @@ const TF_TD = {
 const tdTimeParse = (str, isDaily) => {
   if (!str) return null;
   if (isDaily) return str.slice(0, 10); // 'YYYY-MM-DD'
-  const ms = new Date(str.replace(' ', 'T') + 'Z').getTime();
+  // Accetta sia "2026-05-17 14:32:00" che "2026-05-17T14:32:00" (con o senza Z/offset)
+  const normalized = str.trim().replace(' ', 'T');
+  // Se non ha già indicatore di timezone, aggiungi Z (TwelveData forex = UTC)
+  const withZ = /[Zz]$|[+-]\d{2}:\d{2}$/.test(normalized) ? normalized : normalized + 'Z';
+  const ms = new Date(withZ).getTime();
   return isFinite(ms) ? Math.trunc(ms / 1000) : null;
 };
 
 // Aggrega N candele consecutive in una sola.
-// USA i < bars.length (non i + n <= bars.length): include la coda incompleta come
-// candela parziale, altrimenti le ultime N-1 barre vengono scartate silenziosamente
-// → mancano le ultime 2-3 candele su H3/H6.
+// Usa i < bars.length per includere l'ultima candela parziale (coda incompleta)
+// → nessuna barra viene mai scartata silenziosamente anche se il gruppo è incompleto.
 const aggregateBars = (bars, n) => {
   if (n <= 1) return bars;
   const out = [];
@@ -4420,13 +4423,16 @@ const aggregateBars = (bars, n) => {
   return out;
 };
 
-// Rimuove barre weekend/chiusura forex prima della rimappatura.
+// Rimuove barre weekend/chiusura forex.
+// DEVE essere applicato PRIMA dell'aggregazione: se una barra weekend finisce
+// in un gruppo aggregato, contamina open/high/low/close della candela risultante
+// e crea gap visivi perché il timestamp di quella barra cade nel weekend.
 // Forex chiude venerdì ~22:00 UTC, riapre domenica ~21:00 UTC.
 const filterForexBars = (bars, isDaily) => {
   if (isDaily) {
     return bars.filter(b => {
       const dow = new Date(b.time + 'T00:00:00Z').getUTCDay();
-      return dow !== 0 && dow !== 6;
+      return dow !== 0 && dow !== 6; // escludi domenica(0) e sabato(6)
     });
   }
   return bars.filter(b => {
@@ -4505,15 +4511,16 @@ const fetchChartData = async (tf) => {
 
   if (parsed.length === 0) throw new Error('TwelveData: nessuna barra valida dopo il parse');
 
-  // 1) Aggrega (la coda incompleta è inclusa → ultima candela sempre presente)
-  const aggregated = aggregateBars(parsed, aggN);
-
-  // 2) Filtra weekend/chiusura
-  const filtered = filterForexBars(aggregated, isDaily);
+  // 1) Filtra weekend/chiusura PRIMA di aggregare → nessuna barra weekend
+  //    può contaminare un gruppo aggregato né creare gap nel timestamp
+  const filtered = filterForexBars(parsed, isDaily);
   if (filtered.length === 0) throw new Error('TwelveData: nessuna barra dopo filtro forex');
 
+  // 2) Aggrega (la coda incompleta è inclusa → ultima candela sempre presente)
+  const aggregated = aggregateBars(filtered, aggN);
+
   // 3) Intraday: rimappa a indici sequenziali → zero gap visivi
-  const bars = isDaily ? filtered : remapSequential(filtered);
+  const bars = isDaily ? aggregated : remapSequential(aggregated);
 
   const last = bars[bars.length - 1];
   const prev = bars.length > 1 ? bars[bars.length - 2] : null;
