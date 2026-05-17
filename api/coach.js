@@ -1,5 +1,6 @@
-// Vercel Serverless Function — Gemini 2.0 Flash proxy
-// Legge GEMINI_API_KEY dalle env vars di Vercel (Production+Preview+Development)
+// Vercel Edge Function — Gemini 2.0 Flash proxy
+// Posizione: /api/coach.js
+// Env var: GEMINI_API_KEY (Vercel → Settings → Environment Variables)
 
 export const config = { runtime: 'edge' };
 
@@ -26,82 +27,109 @@ CAPACITÀ:
 
 I dati seguenti sono in JSON, contengono lo stato corrente dell'utente.`;
 
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Content-Type': 'application/json',
+};
+
+const json = (data, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: CORS });
+
 export default async function handler(req) {
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
   const key = process.env.GEMINI_API_KEY;
-  if (!key) {
-    return new Response(JSON.stringify({ error: 'GEMINI_API_KEY non configurata su Vercel' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  if (!key) return json({ error: 'GEMINI_API_KEY non configurata su Vercel' }, 500);
 
   let body;
   try { body = await req.json(); }
-  catch { return new Response(JSON.stringify({ error: 'Body JSON non valido' }), { status: 400, headers: { 'Content-Type': 'application/json' } }); }
+  catch { return json({ error: 'Body JSON non valido' }, 400); }
 
   const { messages = [], context = {} } = body;
 
-  // Costruisci payload Gemini
-  const systemTurn = SYSTEM_PROMPT + '\n\n=== DATI UTENTE ===\n' + JSON.stringify(context, null, 2);
+  // Tronca il contesto per non esplodere la finestra token
+  const contextStr = JSON.stringify(context, null, 2).slice(0, 8000);
+  const systemTurn = SYSTEM_PROMPT + '\n\n=== DATI UTENTE ===\n' + contextStr;
+
+  // Tronca la history a max 20 messaggi per evitare payload enormi
+  const recentMessages = messages.slice(-20);
+
   const contents = [
     { role: 'user',  parts: [{ text: systemTurn }] },
     { role: 'model', parts: [{ text: 'Ricevuto. Sono pronto a rispondere usando solo i dati forniti, in italiano, in modo descrittivo.' }] },
-    ...messages.map(m => ({
+    ...recentMessages.map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: String(m.content || '') }],
+      parts: [{ text: String(m.content || '').slice(0, 2000) }],
     })),
   ];
 
-  try {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents,
-          generationConfig: {
-            temperature: 0.6,
-            maxOutputTokens: 1024,
-            topP: 0.9,
-          },
-          safetySettings: [
-            { category: 'HARM_CATEGORY_HARASSMENT',         threshold: 'BLOCK_ONLY_HIGH' },
-            { category: 'HARM_CATEGORY_HATE_SPEECH',        threshold: 'BLOCK_ONLY_HIGH' },
-            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',  threshold: 'BLOCK_ONLY_HIGH' },
-            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT',  threshold: 'BLOCK_ONLY_HIGH' },
-          ],
-        }),
+  const MAX_RETRIES = 3;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents,
+            generationConfig: {
+              temperature: 0.6,
+              maxOutputTokens: 800,
+              topP: 0.9,
+            },
+            safetySettings: [
+              { category: 'HARM_CATEGORY_HARASSMENT',        threshold: 'BLOCK_ONLY_HIGH' },
+              { category: 'HARM_CATEGORY_HATE_SPEECH',       threshold: 'BLOCK_ONLY_HIGH' },
+              { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+              { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+            ],
+          }),
+        }
+      );
+
+      if (r.status === 429) {
+        const retryAfter = parseInt(r.headers.get('Retry-After') || '0', 10);
+        const delay = retryAfter > 0 ? retryAfter * 1000 : 1500 * attempt;
+        if (attempt < MAX_RETRIES) {
+          await new Promise(res => setTimeout(res, delay));
+          continue;
+        }
+        const errText = await r.text().catch(() => '');
+        return json({
+          error: 'Quota Gemini esaurita (429). Riprova tra qualche minuto.',
+          detail: errText.slice(0, 300),
+        }, 429);
       }
-    );
 
-    if (!r.ok) {
-      const errText = await r.text();
-      return new Response(JSON.stringify({ error: `Gemini error ${r.status}`, detail: errText.slice(0, 500) }), {
-        status: r.status,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      if (!r.ok) {
+        const errText = await r.text().catch(() => '');
+        return json({ error: `Gemini error ${r.status}`, detail: errText.slice(0, 500) }, r.status);
+      }
+
+      const data = await r.json();
+      const candidate = data?.candidates?.[0];
+      if (!candidate || candidate.finishReason === 'SAFETY') {
+        return json({ error: 'Risposta bloccata dai filtri di sicurezza Gemini.' }, 200);
+      }
+
+      const text = candidate?.content?.parts?.[0]?.text
+        || 'Non sono riuscito a generare una risposta.';
+
+      return json({ text });
+
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_RETRIES) {
+        await new Promise(res => setTimeout(res, 1000 * attempt));
+      }
     }
-
-    const data = await r.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text
-      || 'Non sono riuscito a generare una risposta.';
-
-    return new Response(JSON.stringify({ text }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: 'Network error', detail: String(err) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
   }
+
+  return json({ error: 'Network error dopo 3 tentativi', detail: String(lastError) }, 500);
 }
