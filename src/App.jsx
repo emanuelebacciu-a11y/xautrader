@@ -4378,16 +4378,18 @@ const TD_BASE = 'https://api.twelvedata.com';
 const TD_SYMBOL = 'XAU/USD';
 
 // Mapping TF app → { resolution TwelveData, aggregazione N, outputsize }
-// Piano free TwelveData: max 5000 barre per chiamata, 800 req/day, 8 req/min.
+// Piano free TwelveData: 800 req/day, 8 req/min; in pratica restituisce max ~800-1000 barre.
+// Per TF aggregati outputsize = barre_finali × aggN × 1.35 (margine weekend ~30% + sessioni chiuse).
+// H6: usa 2h come base (aggN=3 → 6h) così servono solo 500×3×1.35=~2000 barre raw invece di 3000.
 const TF_TD = {
-  '3m':  { res: '1min',  aggN: 3,  outputsize: 5000 }, // ~1500 barre finali (dopo filtro weekend)
-  '7m':  { res: '1min',  aggN: 7,  outputsize: 5000 }, // ~600 barre finali
-  '13m': { res: '5min',  aggN: 3,  outputsize: 2400 }, // ~700 barre finali (≈15min)
-  '17m': { res: '5min',  aggN: 4,  outputsize: 2400 }, // ~550 barre finali (≈20min)
-  '33m': { res: '15min', aggN: 2,  outputsize: 2000 }, // ~900 barre finali (≈30min)
-  '90m': { res: '30min', aggN: 3,  outputsize: 1500 }, // ~450 barre finali
-  '3h':  { res: '1h',    aggN: 3,  outputsize: 1500 }, // ~450 barre finali (~60 giorni)
-  '6h':  { res: '1h',    aggN: 6,  outputsize: 3000 }, // ~450 barre finali (~120 giorni)
+  '3m':  { res: '1min',  aggN: 3,  outputsize: 5000 }, // ~1200 barre finali
+  '7m':  { res: '1min',  aggN: 7,  outputsize: 5000 }, // ~500 barre finali
+  '13m': { res: '5min',  aggN: 3,  outputsize: 2400 }, // ~550 barre finali (≈15min)
+  '17m': { res: '5min',  aggN: 4,  outputsize: 2400 }, // ~420 barre finali (≈20min)
+  '33m': { res: '15min', aggN: 2,  outputsize: 2400 }, // ~850 barre finali (≈30min)
+  '90m': { res: '30min', aggN: 3,  outputsize: 2400 }, // ~560 barre finali
+  '3h':  { res: '1h',    aggN: 3,  outputsize: 2400 }, // ~560 barre finali (~70 giorni)
+  '6h':  { res: '2h',    aggN: 3,  outputsize: 2400 }, // ~560 barre finali (~140 giorni)
   '1D':  { res: '1day',  aggN: 1,  outputsize: 500  }, // 500 daily (~2 anni)
   '3D':  { res: '1day',  aggN: 3,  outputsize: 1500 }, // ~500 barre finali
 };
@@ -4507,13 +4509,24 @@ const fetchChartData = async (tf) => {
       return isFinite(b.open) && isFinite(b.high) && isFinite(b.low) && isFinite(b.close)
         && b.open > 0 && b.high >= b.low;
     })
-    .reverse(); // oldest → newest
+    .reverse(); // oldest -> newest
+
+  // Sort esplicito per garantire ordine cronologico corretto
+  if (!isDaily) parsed.sort((a, b) => a.time - b.time);
 
   if (parsed.length === 0) throw new Error('TwelveData: nessuna barra valida dopo il parse');
 
-  // 1) Filtra weekend/chiusura PRIMA di aggregare → nessuna barra weekend
-  //    può contaminare un gruppo aggregato né creare gap nel timestamp
-  const filtered = filterForexBars(parsed, isDaily);
+  // Salva l'ultima barra raw (candela corrente, potenzialmente incompleta).
+  const lastRawBar = parsed[parsed.length - 1];
+
+  // 1) Filtra weekend/chiusura PRIMA di aggregare
+  let filtered = filterForexBars(parsed, isDaily);
+
+  // Reinserisci l'ultima barra raw se il filtro l'ha eliminata (es. domenica apertura)
+  if (!isDaily && (filtered.length === 0 || filtered[filtered.length - 1].time !== lastRawBar.time)) {
+    filtered = [...filtered, lastRawBar];
+  }
+
   if (filtered.length === 0) throw new Error('TwelveData: nessuna barra dopo filtro forex');
 
   // 2) Aggrega (la coda incompleta è inclusa → ultima candela sempre presente)
@@ -4563,6 +4576,7 @@ const ChartView = ({ C, trades }) => {
   const [lastPrice, setLastPrice] = useState(null);
   const [spotInfo, setSpotInfo]   = useState(null);
   const [lwReady, setLwReady]     = useState(false);
+  const [crosshairInfo, setCrosshairInfo] = useState(null);
 
   // Carica Lightweight Charts da CDN una volta sola
   useEffect(() => {
@@ -4818,7 +4832,24 @@ const ChartView = ({ C, trades }) => {
     chart.subscribeCrosshairMove(param => {
       if (param.seriesData?.size && seriesRef.current) {
         const d = param.seriesData.get(seriesRef.current);
-        if (d) setLastPrice(d.close);
+        if (d) {
+          setLastPrice(d.close);
+          const bars = barsRef.current;
+          const idx  = typeof param.time === 'number' ? param.time : null;
+          const bar  = (idx !== null && bars[idx]) ? bars[idx] : null;
+          const origTime = bar?.originalTime ?? null;
+          let label = '';
+          if (origTime) {
+            const dt  = new Date(origTime * 1000);
+            const pad = n => String(n).padStart(2,'0');
+            label = pad(dt.getUTCDate())+'/'+pad(dt.getUTCMonth()+1)+' '+pad(dt.getUTCHours())+':'+pad(dt.getUTCMinutes());
+          } else if (typeof param.time === 'string') {
+            label = param.time;
+          }
+          setCrosshairInfo({ label, open:d.open, high:d.high, low:d.low, close:d.close });
+        }
+      } else {
+        setCrosshairInfo(null);
       }
       drawTrades();
     });
@@ -4902,7 +4933,7 @@ const ChartView = ({ C, trades }) => {
   }, [lwReady, tf, loadData]);
 
   return (
-    <div style={{ position:'absolute', inset:0, background:'#000', display:'flex', flexDirection:'column' }}>
+    <div style={{ position:'absolute', inset:0, bottom:0, background:'#000', display:'flex', flexDirection:'column' }}>
 
       {/* Toolbar TF */}
       <div className="flex items-center justify-between px-3" style={{
@@ -4945,9 +4976,60 @@ const ChartView = ({ C, trades }) => {
         </div>
       </div>
 
-      {/* Chart + canvas overlay */}
-      <div ref={containerRef} style={{ flex:1, position:'relative', overflow:'hidden' }}>
+      {/* Chart + canvas overlay — touch diretto al crosshair (no scroll in questa tab) */}
+      <div
+        ref={containerRef}
+        style={{ flex:1, position:'relative', overflow:'hidden' }}
+        onTouchStart={e => {
+          const t = e.touches[0];
+          const chart = chartRef.current, series = seriesRef.current;
+          if (!chart || !series) return;
+          const rect = containerRef.current.getBoundingClientRect();
+          try {
+            const time  = chart.timeScale().coordinateToTime(t.clientX - rect.left);
+            const price = series.coordinateToPrice(t.clientY - rect.top);
+            if (time !== null && price !== null) chart.setCrosshairPosition(price, time, series);
+          } catch(_) {}
+        }}
+        onTouchMove={e => {
+          const t = e.touches[0];
+          const chart = chartRef.current, series = seriesRef.current;
+          if (!chart || !series) return;
+          const rect = containerRef.current.getBoundingClientRect();
+          try {
+            const time  = chart.timeScale().coordinateToTime(t.clientX - rect.left);
+            const price = series.coordinateToPrice(t.clientY - rect.top);
+            if (time !== null && price !== null) chart.setCrosshairPosition(price, time, series);
+          } catch(_) {}
+        }}
+        onTouchEnd={() => {
+          try { if (chartRef.current) chartRef.current.clearCrosshairPosition(); } catch(_) {}
+          setCrosshairInfo(null);
+        }}
+      >
         <canvas ref={canvasRef} style={{ position:'absolute', inset:0, pointerEvents:'none', zIndex:5 }}/>
+        {/* Crosshair tooltip — data/ora + OHLC */}
+        {crosshairInfo && (
+          <div style={{
+            position:'absolute', top:8, left:'50%', transform:'translateX(-50%)',
+            background:'rgba(0,0,0,0.82)', border:'0.5px solid #2a2a2a',
+            borderRadius:8, padding:'5px 10px', zIndex:20, pointerEvents:'none',
+            display:'flex', alignItems:'center', gap:10, whiteSpace:'nowrap',
+            backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)',
+          }}>
+            <span style={{color:'rgba(255,255,255,0.45)',fontSize:10,fontFamily:'SF Mono,ui-monospace,monospace'}}>
+              {crosshairInfo.label}
+            </span>
+            {[['O',crosshairInfo.open],['H',crosshairInfo.high],['L',crosshairInfo.low],['C',crosshairInfo.close]].map(([lbl,val])=>(
+              <span key={lbl} style={{fontSize:10,fontFamily:'SF Mono,ui-monospace,monospace',fontVariantNumeric:'tabular-nums'}}>
+                <span style={{color:'rgba(255,255,255,0.35)'}}>{lbl} </span>
+                <span style={{color: lbl==='C' ? (crosshairInfo.close >= crosshairInfo.open ? '#00ff00' : '#ff00ff') : '#fff'}}>
+                  {val?.toFixed(2)}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
 
         {loading && (
           <div style={{ position:'absolute', inset:0, zIndex:10, display:'flex', alignItems:'center', justifyContent:'center', background:'#000' }}>
@@ -5179,13 +5261,13 @@ export default function TradingApp() {
         </div>
       )}
 
-      {/* CHART — fullscreen, position absolute sopra tutto tranne header e tab bar */}
+      {/* CHART — si ferma sopra la tab bar */}
       {TAB_ORDER[tabIdx] === 'chart' && (
         <div style={{
           flex: 1,
           position: 'relative',
           overflow: 'hidden',
-          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 72px)',
+          paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 90px)',
         }}>
           <ErrorBoundary C={C}>
             <ChartView C={C} trades={trades}/>
