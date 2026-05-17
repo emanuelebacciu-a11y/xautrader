@@ -2148,24 +2148,57 @@ const IconAnalytics = ({ color }) => (
    Pattern: cerchio outer + diversi nodi interni distribuiti, varie tonalità.
    Niente colore vivo: solo grigi/bianchi per essere "neutra" come chiesto. */
 const IconAI = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-    {/* Sfera outer con gradient grigio/bianco */}
+  <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
     <defs>
-      <radialGradient id="xt-ai-orb" cx="35%" cy="32%" r="70%">
-        <stop offset="0%"   stopColor="#FFFFFF" stopOpacity="0.95"/>
-        <stop offset="55%"  stopColor="#A8A8AD" stopOpacity="0.85"/>
-        <stop offset="100%" stopColor="#3A3A3C" stopOpacity="0.95"/>
+      {/* Glow esterno bianco */}
+      <radialGradient id="xt-ai-glow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   stopColor="#FFFFFF" stopOpacity="0.18"/>
+        <stop offset="55%"  stopColor="#FFFFFF" stopOpacity="0.08"/>
+        <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0"/>
+      </radialGradient>
+      {/* Riempimento interno della sfera (semitrasparente, dà profondità) */}
+      <radialGradient id="xt-ai-inner" cx="45%" cy="40%" r="55%">
+        <stop offset="0%"   stopColor="#FFFFFF" stopOpacity="0.28"/>
+        <stop offset="60%"  stopColor="#FFFFFF" stopOpacity="0.08"/>
+        <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0.02"/>
       </radialGradient>
     </defs>
-    <circle cx="12" cy="12" r="10" fill="url(#xt-ai-orb)"/>
-    {/* Nodi interni che ricordano un network "pensante" */}
-    <circle cx="8.2"  cy="9.5"  r="1.4" fill="#FFFFFF" opacity="0.95"/>
-    <circle cx="14.8" cy="8.8"  r="1.1" fill="#E5E5EA" opacity="0.85"/>
-    <circle cx="15.6" cy="14.2" r="1.2" fill="#FFFFFF" opacity="0.8"/>
-    <circle cx="9.2"  cy="14.8" r="0.9" fill="#C7C7CC" opacity="0.75"/>
-    <circle cx="11.8" cy="11.6" r="0.7" fill="#8E8E93" opacity="0.7"/>
-    {/* Highlight superiore */}
-    <ellipse cx="9" cy="7.5" rx="2.6" ry="1.4" fill="#FFFFFF" opacity="0.28"/>
+
+    {/* 1. Aura glow esterna */}
+    <circle cx="16" cy="16" r="15" fill="url(#xt-ai-glow)"/>
+
+    {/* 2. Particelle esterne (puntini bianchi che fluttuano attorno alla sfera) */}
+    <circle cx="3.5"  cy="14"   r="0.55" fill="#FFFFFF" opacity="0.8"/>
+    <circle cx="29"   cy="11"   r="0.45" fill="#FFFFFF" opacity="0.7"/>
+    <circle cx="27.5" cy="22"   r="0.55" fill="#FFFFFF" opacity="0.85"/>
+    <circle cx="4.5"  cy="23"   r="0.4"  fill="#FFFFFF" opacity="0.65"/>
+    <circle cx="16"   cy="2"    r="0.5"  fill="#FFFFFF" opacity="0.8"/>
+    <circle cx="14"   cy="30"   r="0.45" fill="#FFFFFF" opacity="0.7"/>
+    <circle cx="25"   cy="4.5"  r="0.4"  fill="#FFFFFF" opacity="0.65"/>
+    <circle cx="7"    cy="6.5"  r="0.45" fill="#FFFFFF" opacity="0.75"/>
+    <circle cx="21"   cy="28"   r="0.4"  fill="#FFFFFF" opacity="0.6"/>
+    <circle cx="9"    cy="27"   r="0.35" fill="#FFFFFF" opacity="0.55"/>
+
+    {/* 3. Anello bordo della sfera (wireframe bianco brillante) */}
+    <circle cx="16" cy="16" r="11" stroke="#FFFFFF" strokeWidth="1.4" strokeOpacity="0.95"/>
+
+    {/* 4. Riempimento interno della sfera (semitrasparente) */}
+    <circle cx="16" cy="16" r="10.3" fill="url(#xt-ai-inner)"/>
+
+    {/* 5. Particelle interne (puntini bianchi sparsi dentro la sfera) */}
+    <circle cx="11.5" cy="11"   r="0.65" fill="#FFFFFF" opacity="0.95"/>
+    <circle cx="19"   cy="9.5"  r="0.55" fill="#FFFFFF" opacity="0.85"/>
+    <circle cx="20.5" cy="14"   r="0.5"  fill="#FFFFFF" opacity="0.8"/>
+    <circle cx="13"   cy="18.5" r="0.6"  fill="#FFFFFF" opacity="0.9"/>
+    <circle cx="18.5" cy="20.5" r="0.5"  fill="#FFFFFF" opacity="0.8"/>
+    <circle cx="16"   cy="15"   r="0.45" fill="#FFFFFF" opacity="0.75"/>
+    <circle cx="22"   cy="17.5" r="0.4"  fill="#FFFFFF" opacity="0.7"/>
+    <circle cx="10.5" cy="15.5" r="0.4"  fill="#FFFFFF" opacity="0.7"/>
+    <circle cx="15"   cy="22"   r="0.45" fill="#FFFFFF" opacity="0.78"/>
+
+    {/* 6. Highlight superiore sinistro (riflesso) */}
+    <ellipse cx="12.5" cy="10" rx="3" ry="1.6" fill="#FFFFFF" opacity="0.22"
+             transform="rotate(-22 12.5 10)"/>
   </svg>
 );
 
@@ -5586,13 +5619,17 @@ export default function TradingApp() {
                       }}>
                 <div className="xt-tab-icon">
                   {isAI ? (
-                    /* AI: icona "orb pensante" 33px (1px più delle altre 32px), NO gradient bg, NO scale animato */
+                    /* AI: orb Jarvis-style — più grande delle altre (38 vs 32) per essere in evidenza,
+                       NO gradient di sfondo, NO pill bg, glow bianco morbido attorno */
                     <div style={{
-                      width: 33, height: 33, borderRadius: 11,
+                      width: 38, height: 38, borderRadius: 14,
                       background: 'transparent',
                       display:'flex', alignItems:'center', justifyContent:'center',
-                      transform: active ? 'scale(1)' : 'scale(0.95)',
-                      transition:'transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                      transform: active ? 'scale(1.05)' : 'scale(1)',
+                      transition:'transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                      filter: active
+                        ? 'drop-shadow(0 0 8px rgba(255,255,255,0.45)) drop-shadow(0 0 2px rgba(255,255,255,0.7))'
+                        : 'drop-shadow(0 0 4px rgba(255,255,255,0.18))',
                       flexShrink: 0,
                     }}>
                       <Icon/>
