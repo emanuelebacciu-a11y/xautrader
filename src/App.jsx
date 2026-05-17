@@ -3394,6 +3394,14 @@ const EquityChartCard = ({ C, equity }) => {
             <defs>
               {(() => {
                 const vals = equityRangeData.map(d => d.value).filter(v => v != null);
+                // Guard array vuoto: evita Math.min/max(...[]) → ±Infinity → NaN nel gradient SVG
+                if (vals.length === 0) {
+                  return (
+                    <linearGradient id="equityLineGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={C.green} stopOpacity={1}/>
+                    </linearGradient>
+                  );
+                }
                 const minV = Math.min(...vals) - 50;
                 const maxV = Math.max(...vals) + 50;
                 const range = maxV - minV || 1;
