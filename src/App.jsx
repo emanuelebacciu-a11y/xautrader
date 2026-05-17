@@ -160,29 +160,7 @@ const GLOBAL_CSS = `
    Android: navigator.vibrate con pattern calibrati.
    Desktop: silenzioso (solo feedback visivo).
    ---------------------------------------- */
-let _hapticCtx = null;
-const _getCtx = () => {
-  if (!_hapticCtx && typeof AudioContext !== 'undefined') {
-    try { _hapticCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(_){}
-  }
-  return _hapticCtx;
-};
 
-// Genera un click sintetico via AudioContext (iOS)
-const _audioClick = (freq = 1200, dur = 0.008, gain = 0.18) => {
-  const ctx = _getCtx();
-  if (!ctx) return;
-  try {
-    const osc = ctx.createOscillator();
-    const g   = ctx.createGain();
-    osc.connect(g); g.connect(ctx.destination);
-    osc.frequency.value = freq;
-    g.gain.setValueAtTime(gain, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + dur);
-  } catch(_) {}
-};
 
 const _vibe = (pattern) => {
   if (typeof navigator !== 'undefined' && navigator.vibrate) {
@@ -190,71 +168,47 @@ const _vibe = (pattern) => {
   }
 };
 
-// Risveglia AudioContext (richiede un gesto utente) — chiamato al primo tap
-let _hapticReady = false;
-const _wakeHaptic = () => {
-  if (_hapticReady) return;
-  _hapticReady = true;
-  const ctx = _getCtx();
-  if (ctx && ctx.state === 'suspended') ctx.resume().catch(()=>{});
-};
+
 
 // Tipi Apple Taptic Engine → web
 const haptic = {
   // Selezione — picker scroll, tab switch, star hover
   selection: () => {
-    _wakeHaptic();
     _vibe(2);
-    _audioClick(1400, 0.005, 0.10);
   },
   // Light impact — checkbox, chip tag
   light: () => {
-    _wakeHaptic();
     _vibe(4);
-    _audioClick(1100, 0.007, 0.14);
   },
   // Medium impact — toggle switch, button confirm
   medium: () => {
-    _wakeHaptic();
     _vibe(7);
-    _audioClick(900, 0.010, 0.20);
   },
   // Heavy impact — destructive, important nav
   heavy: () => {
-    _wakeHaptic();
     _vibe(12);
-    _audioClick(700, 0.014, 0.28);
   },
   // Rigid — toggle ON (snap netto)
   rigid: () => {
-    _wakeHaptic();
     _vibe([5, 0, 5]);
-    _audioClick(1300, 0.006, 0.22);
   },
   // Soft — toggle OFF (rilascio morbido)
   soft: () => {
-    _wakeHaptic();
     _vibe(3);
-    _audioClick(800, 0.009, 0.12);
   },
   // Success — conferma operazione
   success: () => {
-    _wakeHaptic();
     _vibe([5, 60, 9]);
     setTimeout(()=>_audioClick(1100, 0.007, 0.16), 0);
     setTimeout(()=>_audioClick(1400, 0.006, 0.20), 65);
   },
   // Warning — attenzione
   warning: () => {
-    _wakeHaptic();
     _vibe([8, 50, 6, 50, 4]);
-    _audioClick(600, 0.014, 0.22);
   },
   // Error
   error: () => {
-    _wakeHaptic();
     _vibe([10, 40, 10, 40, 14]);
-    _audioClick(350, 0.018, 0.30);
   },
 };
 
@@ -2201,6 +2155,7 @@ const tabIcons = (C) => ({
   daily:     { glyph: IconToday,     gradient: `linear-gradient(135deg, ${C.green}, #14a300)` },
   temporal:  { glyph: IconHistory,   gradient: `linear-gradient(135deg, ${C.cyan}, #0099b3)` },
   metrics:   { glyph: IconStats,     gradient: `linear-gradient(135deg, ${C.red}, #b3001a)` },
+  analytics: { glyph: IconAnalytics, gradient: `linear-gradient(135deg, ${C.purple}, #5500cc)` },
   stats:     { glyph: IconAnalytics, gradient: `linear-gradient(135deg, ${C.pink}, #7a2eb5)` },
   chart:     { glyph: IconChart,     gradient: `linear-gradient(135deg, ${C.purple}, #6a00c8)` },
 });
@@ -3958,6 +3913,33 @@ class ErrorBoundary extends React.Component {
 }
 
 /* ============= METRICHE STANDALONE PAGE ============= */
+/* ============= METRICS ONLY VIEW (tab rossa) ============= */
+const MetricsOnlyView = ({ C, trades }) => {
+  const stats = useMemo(() => computeAllStats(trades || []), [trades]);
+  return (
+    <div className="space-y-4">
+      <ErrorBoundary C={C}><MetricsView C={C} stats={stats}/></ErrorBoundary>
+    </div>
+  );
+};
+
+/* ============= ANALYTICS FULL VIEW (tab viola) ============= */
+const AnalyticsFullView = ({ C, trades }) => {
+  const [confluences] = usePersistedState('xt_confluences', {});
+  const [confidence]  = usePersistedState('xt_confidence',  {});
+  const stats          = useMemo(() => computeAllStats(trades || []), [trades]);
+  const confBreakdown  = useMemo(() => computeConfluenceBreakdown(trades, confluences), [trades, confluences]);
+  const confCorr       = useMemo(() => computeConfidenceBreakdown(trades, confidence),  [trades, confidence]);
+  return (
+    <div className="space-y-4">
+      <ErrorBoundary C={C}>
+        <BreakdownView C={C} trades={trades} stats={stats} confluences={confluences} confidence={confidence} confBreakdown={confBreakdown} confCorr={confCorr}/>
+        <AnalyticsView C={C} trades={trades}/>
+      </ErrorBoundary>
+    </div>
+  );
+};
+
 const MetricheView = ({ C, trades }) => {
   const [confluences] = usePersistedState('xt_confluences', {});
   const [confidence]  = usePersistedState('xt_confidence',  {});
@@ -4763,7 +4745,7 @@ const ChartView = ({ C, trades }) => {
       crosshair: {
         mode: 1,
         vertLine: { color:'#636363', width:1, style:2, visible:true, labelVisible:true, labelBackgroundColor:'#111' },
-        horzLine: { color:'#636363', width:1, style:3, visible:true, labelVisible:true, labelBackgroundColor:'#111' },
+        horzLine: { color:'#ffffff', width:1, style:3, visible:true, labelVisible:true, labelBackgroundColor:'#111' },
       },
       rightPriceScale: {
         visible:          true,
@@ -4947,7 +4929,7 @@ const ChartView = ({ C, trades }) => {
   }, [lwReady, tf, loadData]);
 
   return (
-    <div style={{ position:'absolute', top:0, left:0, right:0, bottom:'calc(env(safe-area-inset-bottom, 0px) + 82px)', background:'#000', display:'flex', flexDirection:'column' }}>
+    <div style={{ position:'absolute', top:0, left:0, right:0, bottom:'calc(env(safe-area-inset-bottom, 0px) + 68px)', background:'#000', display:'flex', flexDirection:'column' }}>
 
       {/* Toolbar TF */}
       <div className="flex items-center justify-between px-3" style={{
@@ -5022,28 +5004,7 @@ const ChartView = ({ C, trades }) => {
         }}
       >
         <canvas ref={canvasRef} style={{ position:'absolute', inset:0, pointerEvents:'none', zIndex:5 }}/>
-        {/* Crosshair tooltip — data/ora + OHLC */}
-        {crosshairInfo && (
-          <div style={{
-            position:'absolute', top:8, left:'50%', transform:'translateX(-50%)',
-            background:'rgba(0,0,0,0.82)', border:'0.5px solid #2a2a2a',
-            borderRadius:8, padding:'5px 10px', zIndex:20, pointerEvents:'none',
-            display:'flex', alignItems:'center', gap:10, whiteSpace:'nowrap',
-            backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)',
-          }}>
-            <span style={{color:'rgba(255,255,255,0.45)',fontSize:10,fontFamily:'SF Mono,ui-monospace,monospace'}}>
-              {crosshairInfo.label}
-            </span>
-            {[['O',crosshairInfo.open],['H',crosshairInfo.high],['L',crosshairInfo.low],['C',crosshairInfo.close]].map(([lbl,val])=>(
-              <span key={lbl} style={{fontSize:10,fontFamily:'SF Mono,ui-monospace,monospace',fontVariantNumeric:'tabular-nums'}}>
-                <span style={{color:'rgba(255,255,255,0.35)'}}>{lbl} </span>
-                <span style={{color: lbl==='C' ? (crosshairInfo.close >= crosshairInfo.open ? '#00ff00' : '#ff00ff') : '#fff'}}>
-                  {val?.toFixed(2)}
-                </span>
-              </span>
-            ))}
-          </div>
-        )}
+
 
         {loading && (
           <div style={{ position:'absolute', inset:0, zIndex:10, display:'flex', alignItems:'center', justifyContent:'center', background:'#000' }}>
@@ -5119,7 +5080,7 @@ export default function TradingApp() {
   const [activeAccount, setActiveAccount]  = usePersistedState('xt_active_account', 'main');
   const [settingsOpen, setSettingsOpen]    = useState(false);
 
-  const TAB_ORDER = ['daily', 'temporal', 'metrics', 'chart'];
+  const TAB_ORDER = ['daily', 'temporal', 'metrics', 'analytics'];
   const [tabIdx, setTabIdx] = useState(0);
   const tabIdxRef = useRef(0); // mirror di tabIdx, accessibile nei listener senza closure stale
 
@@ -5145,10 +5106,10 @@ export default function TradingApp() {
   };
 
   const tabs = [
-    { id:'daily',    label:'Oggi'    },
-    { id:'temporal', label:'Storico' },
-    { id:'metrics',  label:'Stats'   },
-    { id:'chart',    label:'Chart'   },
+    { id:'daily',     label:'Oggi'    },
+    { id:'temporal',  label:'Storico' },
+    { id:'metrics',   label:'Stats'   },
+    { id:'analytics', label:'Analisi' },
   ];
   const streak       = useMemo(() => detectStreak(trades),  [trades]);
   const cooldownOn   = useMemo(() => settings.cooldownEnabled && detectCooldown(trades), [settings.cooldownEnabled, trades]);
@@ -5264,25 +5225,19 @@ export default function TradingApp() {
       </header>
 
       {/* PAGER — scrollabile solo nel content, non nella pagina */}
-      {TAB_ORDER[tabIdx] !== 'chart' && (
+      {(
         <div style={{ flex:1, overflowY:'auto', overflowX:'hidden', WebkitOverflowScrolling:'touch', overscrollBehavior:'none', paddingBottom:'env(safe-area-inset-bottom, 0px)' }}>
           <div className="max-w-7xl mx-auto px-5 py-4"
             style={{ paddingBottom: 70 }}>
-            {TAB_ORDER[tabIdx] === 'daily'    && <ErrorBoundary C={C}><DailyView     C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
-            {TAB_ORDER[tabIdx] === 'temporal' && <ErrorBoundary C={C}><TemporalView  C={C} trades={trades} equity={equity}/></ErrorBoundary>}
-            {TAB_ORDER[tabIdx] === 'metrics'  && <ErrorBoundary C={C}><MetricheView  C={C} trades={trades}/></ErrorBoundary>}
+            {TAB_ORDER[tabIdx] === 'daily'     && <ErrorBoundary C={C}><DailyView     C={C} now={now} settings={settings} trades={trades} equity={equity}/></ErrorBoundary>}
+            {TAB_ORDER[tabIdx] === 'temporal'  && <ErrorBoundary C={C}><TemporalView  C={C} trades={trades} equity={equity}/></ErrorBoundary>}
+            {TAB_ORDER[tabIdx] === 'metrics'   && <ErrorBoundary C={C}><MetricsOnlyView C={C} trades={trades}/></ErrorBoundary>}
+            {TAB_ORDER[tabIdx] === 'analytics' && <ErrorBoundary C={C}><AnalyticsFullView C={C} trades={trades}/></ErrorBoundary>}
           </div>
         </div>
       )}
 
-      {/* CHART — flex:1, il margine dalla tab bar è gestito dentro ChartView */}
-      {TAB_ORDER[tabIdx] === 'chart' && (
-        <div style={{ flex:1, position:'relative', overflow:'hidden' }}>
-          <ErrorBoundary C={C}>
-            <ChartView C={C} trades={trades}/>
-          </ErrorBoundary>
-        </div>
-      )}
+
 
       {/* BOTTOM TAB BAR */}
       <div className="fixed left-1/2 z-50" style={{
